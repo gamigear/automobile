@@ -42,4 +42,7 @@ yarn-error.log*
 
 _static
 
+# runtime uploads and debug captures
+/public/uploads/
+
 .unimportedrc.json
