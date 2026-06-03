@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: gami
+      POSTGRES_USER: gami
+      POSTGRES_PASSWORD: gami_local_password
+    volumes:
+      - gami-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gami -d gami"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    command: npm run start
+    ports:
+      - "8081:8081"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-postgresql://gami:gami_local_password@postgres:5432/gami?schema=public}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: npm run worker
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-postgresql://gami:gami_local_password@postgres:5432/gami?schema=public}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      web:
+        condition: service_started
+
+  telegram-bot:
+    build: .
+    command: npm run telegram:bot
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-postgresql://gami:gami_local_password@postgres:5432/gami?schema=public}
+      TELEGRAM_APP_BASE_URL: http://web:8081
+    depends_on:
+      web:
+        condition: service_started
+
+volumes:
+  gami-postgres-data:

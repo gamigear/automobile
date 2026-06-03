@@ -1,0 +1,411 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  APPROVER
+  EDITOR
+  STAFF
+  VIEWER
+}
+
+enum PostStatus {
+  DRAFT
+  WAITING_APPROVAL
+  APPROVED
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  CANCELLED
+}
+
+enum Platform {
+  FACEBOOK
+  INSTAGRAM
+}
+
+enum SocialAccountType {
+  FANPAGE
+  PROFILE
+  INSTAGRAM_BUSINESS
+  INSTAGRAM_CREATOR
+}
+
+enum DeviceType {
+  ANTIDETECT_PROFILE
+  ANDROID_DEVICE
+}
+
+enum DeviceProvider {
+  MOSTLOGIN
+  DONUT
+  NSTBROWSER
+  ADB
+  MANUAL
+}
+
+enum DeviceStatus {
+  ACTIVE
+  INACTIVE
+  ERROR
+  DISCONNECTED
+}
+
+enum DeviceRole {
+  PRIMARY
+  BACKUP
+  RECOVERY
+  PUBLISHING
+  SYNC_ONLY
+}
+
+enum AccountMemberRole {
+  OWNER
+  MANAGER
+  APPROVER
+  EDITOR
+  STAFF
+  VIEWER
+}
+
+enum AccountDeviceVerificationStatus {
+  UNVERIFIED
+  VERIFYING
+  VERIFIED
+  LOGIN_REQUIRED
+  MISMATCH
+  ERROR
+}
+
+enum SourcePlatform {
+  XSH
+  DOUYIN
+  UNKNOWN
+}
+
+enum SourceImportStatus {
+  QUEUED
+  DOWNLOADING
+  TRANSLATING
+  DRAFT_CREATED
+  FAILED
+  CANCELLED
+}
+
+enum DraftOrigin {
+  MANUAL
+  SOURCE_URL
+  TELEGRAM
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String?
+  role         UserRole   @default(STAFF)
+  active       Boolean    @default(true)
+  posts        Post[]
+  accountMembers SocialAccountMember[]
+  auditLogs    AuditLog[]
+  notifications Notification[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model SocialAccount {
+  id               String       @id @default(cuid())
+  name             String
+  platform         Platform
+  type             SocialAccountType @default(FANPAGE)
+  externalId       String?
+  avatarUrl        String?
+  profileUrl       String?
+  tokenCiphertext  String?
+  tokenExpiresAt   DateTime?
+  approvalRequired Boolean      @default(true)
+  defaultTimezone  String       @default("Asia/Ho_Chi_Minh")
+  defaultScheduleSlots Json?
+  active           Boolean      @default(true)
+  posts            Post[]
+  targets          PostTarget[]
+  mediaAssets      MediaAsset[]
+  contentSources   ContentSource[]
+  devices          SocialAccountDevice[]
+  members          SocialAccountMember[]
+  jobs             JobLog[]
+  sourceImports    SourceImport[]
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([platform, externalId])
+}
+
+model Device {
+  id             String        @id @default(cuid())
+  name           String
+  type           DeviceType
+  provider       DeviceProvider
+  externalId     String?
+  profileName    String?
+  adbId          String?
+  deviceModel    String?
+  androidVersion String?
+  proxyInfo      Json?
+  metadata       Json?
+  status         DeviceStatus  @default(INACTIVE)
+  healthStatus   String        @default("UNKNOWN")
+  locked         Boolean       @default(false)
+  lockedAt       DateTime?
+  lockedReason   String?
+  notes          String?
+  lastSeenAt     DateTime?
+  accounts       SocialAccountDevice[]
+  healthLogs     DeviceHealthLog[]
+  jobs           JobLog[]
+  posts          Post[]
+  mediaAssets    MediaAsset[]
+  contentSources ContentSource[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@unique([provider, externalId])
+  @@unique([provider, adbId])
+}
+
+model SocialAccountDevice {
+  id              String        @id @default(cuid())
+  socialAccountId String
+  socialAccount   SocialAccount @relation(fields: [socialAccountId], references: [id])
+  deviceId        String
+  device          Device        @relation(fields: [deviceId], references: [id])
+  role            DeviceRole    @default(PRIMARY)
+  isPrimary       Boolean       @default(false)
+  verificationStatus AccountDeviceVerificationStatus @default(UNVERIFIED)
+  verifiedAt      DateTime?
+  detectedAccountName String?
+  detectedAccountUrl String?
+  detectedAccountId String?
+  lastVerificationError String?
+  verificationMetadata Json?
+  createdAt       DateTime      @default(now())
+
+  @@unique([socialAccountId, deviceId, role])
+}
+
+model SocialAccountMember {
+  id              String            @id @default(cuid())
+  socialAccountId String
+  socialAccount   SocialAccount     @relation(fields: [socialAccountId], references: [id])
+  userId          String
+  user            User              @relation(fields: [userId], references: [id])
+  role            AccountMemberRole @default(VIEWER)
+  createdAt       DateTime          @default(now())
+
+  @@unique([socialAccountId, userId])
+}
+
+model DeviceHealthLog {
+  id        String   @id @default(cuid())
+  deviceId  String
+  device    Device   @relation(fields: [deviceId], references: [id])
+  status    String
+  message   String?
+  metadata  Json?
+  checkedAt DateTime @default(now())
+}
+
+model Post {
+  id          String        @id @default(cuid())
+  deviceId    String?
+  device      Device?       @relation(fields: [deviceId], references: [id])
+  socialAccountId String?
+  socialAccount   SocialAccount? @relation(fields: [socialAccountId], references: [id])
+  title       String
+  caption     String
+  status      PostStatus    @default(DRAFT)
+  draftOrigin DraftOrigin   @default(MANUAL)
+  sourceImportId String?
+  sourceImport   SourceImport? @relation(fields: [sourceImportId], references: [id])
+  sourceUrl   String?
+  sourcePlatform SourcePlatform?
+  scheduledAt DateTime?
+  createdById String
+  createdBy   User          @relation(fields: [createdById], references: [id])
+  targets     PostTarget[]
+  media        PostMedia[]
+  versions     PostVersion[]
+  approvals    ApprovalLog[]
+  deletedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
+model PostTarget {
+  id              String        @id @default(cuid())
+  postId          String
+  post            Post          @relation(fields: [postId], references: [id])
+  socialAccountId String
+  socialAccount   SocialAccount @relation(fields: [socialAccountId], references: [id])
+  status          PostStatus    @default(DRAFT)
+  externalPostId  String?
+  errorMessage    String?
+  publishedAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model MediaAsset {
+  id              String         @id @default(cuid())
+  deviceId        String?
+  device          Device?        @relation(fields: [deviceId], references: [id])
+  name            String
+  mimeType        String
+  size            BigInt?
+  provider        String         @default("google_drive")
+  externalId      String
+  webViewLink     String?
+  thumbnailLink   String?
+  folderName      String?
+  category        String?
+  sourceImportId  String?
+  sourceImport    SourceImport? @relation(fields: [sourceImportId], references: [id])
+  localPath       String?
+  socialAccountId String?
+  socialAccount   SocialAccount? @relation(fields: [socialAccountId], references: [id])
+  posts           PostMedia[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@unique([provider, externalId])
+}
+
+model SourceImport {
+  id                String             @id @default(cuid())
+  socialAccountId   String
+  socialAccount     SocialAccount      @relation(fields: [socialAccountId], references: [id])
+  deviceId          String?
+  postId            String?
+  sourcePlatform    SourcePlatform     @default(UNKNOWN)
+  sourceUrl         String
+  sourceTitle       String?
+  sourceCaption     String?
+  translatedTitle   String?
+  translatedCaption String?
+  status            SourceImportStatus @default(QUEUED)
+  errorMessage      String?
+  metadata          Json?
+  createdById       String?
+  posts             Post[]
+  mediaAssets       MediaAsset[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([socialAccountId, createdAt])
+  @@index([sourceUrl])
+  @@index([status])
+}
+
+model PostMedia {
+  postId       String
+  mediaAssetId String
+  sortOrder    Int        @default(0)
+  post         Post       @relation(fields: [postId], references: [id])
+  mediaAsset   MediaAsset @relation(fields: [mediaAssetId], references: [id])
+
+  @@id([postId, mediaAssetId])
+}
+
+model ContentSource {
+  id         String   @id @default(cuid())
+  deviceId   String?
+  device     Device?  @relation(fields: [deviceId], references: [id])
+  socialAccountId String?
+  socialAccount   SocialAccount? @relation(fields: [socialAccountId], references: [id])
+  name       String
+  provider   String   @default("google_drive")
+  externalId String
+  active     Boolean  @default(true)
+  lastSyncAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([provider, externalId])
+}
+
+model PostVersion {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id])
+  snapshot  Json
+  createdAt DateTime @default(now())
+}
+
+model ApprovalLog {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id])
+  actorId   String?
+  action    String
+  comment   String?
+  createdAt DateTime @default(now())
+}
+
+model JobLog {
+  id          String    @id @default(cuid())
+  jobId       String?
+  socialAccountId String?
+  socialAccount   SocialAccount? @relation(fields: [socialAccountId], references: [id])
+  deviceId    String?
+  device      Device?   @relation(fields: [deviceId], references: [id])
+  type        String
+  status      String
+  payload     Json?
+  attempts    Int       @default(0)
+  errorMessage String?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  title     String
+  message   String?
+  category  String   @default("System")
+  type      String   @default("system")
+  severity  String   @default("info")
+  entity    String?
+  entityId  String?
+  href      String?
+  metadata  Json?
+  readAt    DateTime?
+  archivedAt DateTime?
+  createdAt DateTime @default(now())
+}
