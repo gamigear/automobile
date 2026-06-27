@@ -114,12 +114,18 @@ function containerReachable(url: string): string {
   return (url || '').replace(/localhost|127\.0\.0\.1/g, 'host.docker.internal');
 }
 
-export async function vietsubVideo(hostVideoPath: string, postId?: string): Promise<VietsubResult> {
+export async function vietsubVideo(
+  hostVideoPath: string,
+  postId?: string,
+  opts?: { contextHint?: string }
+): Promise<VietsubResult> {
   const settings = getSourceDownloadSettings();
   if (!settings.enabled) throw new Error('Source downloader/bot đang bị tắt');
 
   const containerPath = hostToContainer(hostVideoPath);
-  const model = process.env.VIETSUB_WHISPER_MODEL || 'small';
+  // medium chính xác hơn small (đặc biệt tiếng Trung); override qua env nếu cần small cho nhanh.
+  const model = process.env.VIETSUB_WHISPER_MODEL || 'medium';
+  const contextHint = (opts?.contextHint || '').trim();
 
   // Cấu hình API/model dịch từ Settings (AppSetting) + env fallback.
   const translateConfig = await getTranslateConfig();
@@ -140,6 +146,8 @@ export async function vietsubVideo(hostVideoPath: string, postId?: string): Prom
       `VIETSUB_TRANSLATE_API_KEY=${env.VIETSUB_TRANSLATE_API_KEY}`,
       '-e',
       `VIETSUB_TRANSLATE_MODEL=${env.VIETSUB_TRANSLATE_MODEL}`,
+      '-e',
+      `VIETSUB_CONTEXT_HINT=${contextHint}`,
       settings.douyinContainer,
       'python',
       '/app/app/video_vietsub.py',

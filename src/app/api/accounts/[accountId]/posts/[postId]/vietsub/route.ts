@@ -29,6 +29,18 @@ export async function POST(request: Request, { params }: Params) {
 
   if (!post) return NextResponse.json({ message: 'Không tìm thấy bài viết' }, { status: 404 });
 
+  // Body optional: { contextHint?: string } — gợi ý bối cảnh/nhân vật để dịch xưng hô đúng.
+  let contextHint = '';
+  try {
+    const text = await request.text();
+    if (text) {
+      const parsed = JSON.parse(text);
+      if (typeof parsed?.contextHint === 'string') contextHint = parsed.contextHint.slice(0, 2000);
+    }
+  } catch {
+    // body không phải JSON valid → bỏ qua
+  }
+
   // Chọn video gốc (chưa phải bản vietsub) có localPath.
   const videoItem = post.media.find(
     (m) =>
@@ -46,7 +58,7 @@ export async function POST(request: Request, { params }: Params) {
   startVietsubProgress(post.id);
 
   try {
-    const result = await vietsubVideo(orig.localPath as string, post.id);
+    const result = await vietsubVideo(orig.localPath as string, post.id, { contextHint });
 
     if (!fs.existsSync(result.outputHostPath)) {
       finishVietsubProgress(post.id, 'Không thấy file output');

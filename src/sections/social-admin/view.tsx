@@ -1182,6 +1182,7 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
   const [vietsubBusy, setVietsubBusy] = useState(false);
   const [vietsubElapsed, setVietsubElapsed] = useState(0);
   const [vietsubProgress, setVietsubProgress] = useState<{ percent: number; label: string } | null>(null);
+  const [vietsubHint, setVietsubHint] = useState('');
   const vietsubTimer = useRef<any>(null);
   const vietsubPollTimer = useRef<any>(null);
   const [deviceForm, setDeviceForm] = useState({
@@ -1802,6 +1803,7 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
       const res = await fetch(`/api/accounts/${accountId}/posts/${postId}/vietsub/`, {
         method: 'POST',
         headers: authJsonHeaders(),
+        body: JSON.stringify({ contextHint: vietsubHint }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || 'Vietsub thất bại');
@@ -1815,7 +1817,7 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
       setVietsubProgress(null);
       setVietsubBusy(false);
     }
-  }, [accountId, postId, enqueueSnackbar]);
+  }, [accountId, postId, enqueueSnackbar, vietsubHint]);
 
   const removeVietsub = useCallback(async () => {
     if (!accountId || !postId) return;
@@ -2362,6 +2364,18 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
                       />
                     </Stack>
                   )}
+                  <TextField
+                    fullWidth
+                    multiline
+                    minRows={2}
+                    size="small"
+                    label="Bối cảnh / nhân vật (gợi ý dịch xưng hô)"
+                    placeholder="VD: Hội thoại giữa giám đốc nam lớn tuổi và nữ thư ký trẻ; xưng hô lịch sự. Nhân vật chính tên Lâm (nam)."
+                    helperText="Tuỳ chọn — giúp AI chọn anh/em/chị/ông/bà… đúng vai vế & giới tính."
+                    value={vietsubHint}
+                    onChange={(e) => setVietsubHint(e.target.value)}
+                    disabled={vietsubBusy}
+                  />
                   <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
                     <Button variant="contained" disabled={!canCreate || savingPostDetail} onClick={savePostDetail}>
                       Lưu thay đổi
