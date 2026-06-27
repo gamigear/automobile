@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import NextLink from 'next/link';
 import { useParams, usePathname } from 'next/navigation';
 // @mui
@@ -18,11 +18,17 @@ import Typography from '@mui/material/Typography';
 import CardHeader from '@mui/material/CardHeader';
 import CardContent from '@mui/material/CardContent';
 import Tooltip from '@mui/material/Tooltip';
+import Tab from '@mui/material/Tab';
+import Tabs from '@mui/material/Tabs';
+import Divider from '@mui/material/Divider';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
+import CircularProgress from '@mui/material/CircularProgress';
+import LinearProgress from '@mui/material/LinearProgress';
 import { DataGrid, GridColDef, GridRowSelectionModel } from '@mui/x-data-grid';
 // routes
 import { paths } from 'src/routes/paths';
@@ -89,6 +95,7 @@ function StatusChip({ value }: { value: string }) {
 function socialPlatformIcon(platform: string) {
   if (platform === 'FACEBOOK') return 'logos:facebook';
   if (platform === 'INSTAGRAM') return 'skill-icons:instagram';
+  if (platform === 'TIKTOK') return 'logos:tiktok-icon';
 
   return 'solar:global-bold';
 }
@@ -505,7 +512,7 @@ export default function SocialAdminView({ module }: Props) {
       {module === 'sources' && <SourcesModule canAdmin={canAdmin} />}
       {module === 'accounts' && <AccountsModule canAdmin={canAdmin} />}
       {module === 'account-workspace' && <AccountWorkspaceModule canAdmin={canAdmin} canCreate={canCreate} />}
-      {module === 'devices' && <DevicesModule />}
+      {module === 'devices' && <DeviceListModule canAdmin={canAdmin} type="ANDROID_DEVICE" title="Devices" />}
       {module === 'mostlogin-devices' && <DeviceListModule canAdmin={canAdmin} provider="MOSTLOGIN" title="MostLogin Profiles" />}
       {module === 'android-devices' && <DeviceListModule canAdmin={canAdmin} type="ANDROID_DEVICE" title="Android Devices" />}
       {module === 'device-add' && <DeviceAddModule canAdmin={canAdmin} />}
@@ -1138,6 +1145,24 @@ function AccountsModule({ canAdmin }: { canAdmin: boolean }) {
   );
 }
 
+function sourceImportStatusMeta(status: string): { label: string; color: 'default' | 'info' | 'success' | 'error' | 'warning' } {
+  switch (status) {
+    case 'DRAFT_CREATED':
+      return { label: 'Đã chuyển', color: 'success' };
+    case 'FAILED':
+      return { label: 'Lỗi không chuyển', color: 'error' };
+    case 'DOWNLOADING':
+    case 'TRANSLATING':
+      return { label: 'Đang chuyển', color: 'info' };
+    case 'QUEUED':
+      return { label: 'Đang chờ chuyển', color: 'warning' };
+    case 'CANCELLED':
+      return { label: 'Đã hủy', color: 'default' };
+    default:
+      return { label: status, color: 'default' };
+  }
+}
+
 function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; canCreate: boolean }) {
   const params = useParams();
   const pathname = usePathname();
@@ -1146,19 +1171,48 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
   const postId = String(params?.postId || '');
   const [account, setAccount] = useState<any>(null);
   const [postDetail, setPostDetail] = useState<any>(null);
-  const [postDetailForm, setPostDetailForm] = useState({ title: '', caption: '', scheduledAt: '', status: 'DRAFT' });
+  const [postDetailForm, setPostDetailForm] = useState({ title: '', caption: '', scheduledAt: '', status: 'DRAFT', tiktokMusicName: '', tiktokMuteOriginal: false, tiktokRandomMusic: false });
   const [assignedDevices, setAssignedDevices] = useState<any[]>([]);
   const [selectedDeviceRows, setSelectedDeviceRows] = useState<GridRowSelectionModel>([]);
   const [selectedSourceImportRows, setSelectedSourceImportRows] = useState<GridRowSelectionModel>([]);
   const [assigningDevice, setAssigningDevice] = useState(false);
   const [savingPostDetail, setSavingPostDetail] = useState(false);
+  const [favMusicDraft, setFavMusicDraft] = useState('');
+  const [savingFavMusic, setSavingFavMusic] = useState(false);
+  const [vietsubBusy, setVietsubBusy] = useState(false);
+  const [vietsubElapsed, setVietsubElapsed] = useState(0);
+  const [vietsubProgress, setVietsubProgress] = useState<{ percent: number; label: string } | null>(null);
+  const vietsubTimer = useRef<any>(null);
+  const vietsubPollTimer = useRef<any>(null);
   const [deviceForm, setDeviceForm] = useState({
     deviceId: '',
     role: 'BACKUP',
     isPrimary: false,
   });
   const [sourceImportForm, setSourceImportForm] = useState({ url: '', platform: 'auto' });
+  const [douyinUserUrl, setDouyinUserUrl] = useState('');
+  const [douyinVideos, setDouyinVideos] = useState<any[]>([]);
+  const [douyinNickname, setDouyinNickname] = useState('');
+  const [douyinSelected, setDouyinSelected] = useState<Record<string, boolean>>({});
+  const [douyinBusy, setDouyinBusy] = useState(false);
+  const [douyinElapsed, setDouyinElapsed] = useState(0);
+  const [douyinReveal, setDouyinReveal] = useState(0);
+  const douyinTimers = useRef<{ elapsed?: any; reveal?: any }>({});
+  const [douyinFollows, setDouyinFollows] = useState<any[]>([]);
+
+  useEffect(
+    () => () => {
+      clearInterval(douyinTimers.current.elapsed);
+      clearInterval(douyinTimers.current.reveal);
+      clearInterval(vietsubTimer.current);
+    },
+    []
+  );
   const [importingSource, setImportingSource] = useState(false);
+  const [bulkLinks, setBulkLinks] = useState('');
+  const [bulkImporting, setBulkImporting] = useState(false);
+  const [createTab, setCreateTab] = useState<'single' | 'bulk' | 'history'>('bulk');
+  const [postsTab, setPostsTab] = useState<'published' | 'scheduled' | 'draft'>('draft');
   const [localSourceImports, setLocalSourceImports] = useState<any[]>([]);
   const showDeviceManager = pathname.endsWith('/devices');
   const showPostDetail = Boolean(postId);
@@ -1180,7 +1234,7 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
     5000,
     Boolean(accountId)
   );
-  const postRows = useApiRows(shouldLoadPosts && accountId ? `/api/accounts/${accountId}/posts/` : '', []);
+  const postRows = usePollingApiRows<any>(shouldLoadPosts && accountId ? `/api/accounts/${accountId}/posts/` : '', [], 5000, Boolean(shouldLoadPosts && accountId));
   const mediaRows = useApiRows(shouldLoadMedia && accountId ? `/api/accounts/${accountId}/media/` : '', []);
   const sourceRows = useApiRows(shouldLoadSources && accountId ? `/api/accounts/${accountId}/sources/` : '', []);
   const jobRows = useApiRows(shouldLoadJobs && accountId ? `/api/accounts/${accountId}/jobs/` : '', []);
@@ -1196,6 +1250,22 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
   const mergedSourceImports = Array.from(
     new Map([...localSourceImports, ...sourceImportRows].map((row) => [row.id, row])).values()
   );
+  const publishedPostRows = useMemo(() => postRows.filter((row: any) => row.status === 'PUBLISHED'), [postRows]);
+  const scheduledPostRows = useMemo(() => postRows.filter((row: any) => row.status === 'SCHEDULED'), [postRows]);
+  const draftPostRows = useMemo(
+    () => postRows.filter((row: any) => row.status !== 'PUBLISHED' && row.status !== 'SCHEDULED'),
+    [postRows]
+  );
+  const postsTabConfig = useMemo(
+    () => [
+      { value: 'published', label: 'Bài đã đăng', rows: publishedPostRows },
+      { value: 'scheduled', label: 'Bài đã lên lịch', rows: scheduledPostRows },
+      { value: 'draft', label: 'Bài nháp', rows: draftPostRows },
+    ],
+    [publishedPostRows, scheduledPostRows, draftPostRows]
+  );
+  const activePostsTab = postsTabConfig.find((tab) => tab.value === postsTab) || postsTabConfig[2];
+
   const workspacePostColumns = useMemo<GridColDef[]>(
     () => [
       ...postColumns,
@@ -1228,9 +1298,13 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
     fetch(`/api/accounts/${accountId}/`)
       .then((response) => response.json())
       .then((response) => {
-        if (active) setAccount(response.data || null);
+        if (!active) return;
+        setAccount(response.data || null);
+        setFavMusicDraft(((response.data?.tiktokFavoriteMusic as string[]) || []).join('\n'));
       })
       .catch(() => undefined);
+
+    loadDouyinFollows();
 
     return () => {
       active = false;
@@ -1253,6 +1327,9 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
           caption: response.data.caption || '',
           scheduledAt: response.data.scheduledAt ? String(response.data.scheduledAt).replace(' ', 'T') : '',
           status: response.data.status || 'DRAFT',
+          tiktokMusicName: response.data.tiktokMusicName || '',
+          tiktokMuteOriginal: Boolean(response.data.tiktokMuteOriginal),
+          tiktokRandomMusic: Boolean(response.data.tiktokRandomMusic),
         });
       })
       .catch(() => undefined);
@@ -1313,6 +1390,329 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
     }
   }, [accountId, enqueueSnackbar, sourceImportForm]);
 
+  const loadDouyinFollows = useCallback(async () => {
+    if (!accountId) return;
+    try {
+      const res = await fetch(`/api/accounts/${accountId}/follows/`, { headers: authJsonHeaders() });
+      const body = await res.json();
+      if (res.ok && Array.isArray(body.data)) setDouyinFollows(body.data);
+    } catch {
+      /* ignore */
+    }
+  }, [accountId]);
+
+  const listDouyinUser = useCallback(async () => {
+    if (!accountId || !douyinUserUrl.trim()) return;
+
+    // Dọn timer cũ + reset hiển thị.
+    clearInterval(douyinTimers.current.elapsed);
+    clearInterval(douyinTimers.current.reveal);
+    setDouyinBusy(true);
+    setDouyinVideos([]);
+    setDouyinReveal(0);
+    setDouyinElapsed(0);
+    setDouyinSelected({});
+    // Bộ đếm giây cho biết tool đang chạy.
+    douyinTimers.current.elapsed = setInterval(() => setDouyinElapsed((s) => s + 1), 1000);
+
+    try {
+      const res = await fetch(`/api/accounts/${accountId}/douyin/list/`, {
+        method: 'POST',
+        headers: authJsonHeaders(),
+        body: JSON.stringify({ url: douyinUserUrl.trim() }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || 'Không liệt kê được');
+
+      const videos = body.data?.videos || [];
+      setDouyinNickname(body.data?.nickname || '');
+      setDouyinVideos(videos);
+      // Hiện lần lượt từng bài (~150ms/bài) để thấy "chạy ra".
+      setDouyinReveal(0);
+      clearInterval(douyinTimers.current.reveal);
+      douyinTimers.current.reveal = setInterval(() => {
+        setDouyinReveal((n) => {
+          if (n >= videos.length) {
+            clearInterval(douyinTimers.current.reveal);
+            return n;
+          }
+          return n + 1;
+        });
+      }, 150);
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Không liệt kê được', { variant: 'error' });
+    } finally {
+      clearInterval(douyinTimers.current.elapsed);
+      setDouyinBusy(false);
+    }
+  }, [accountId, douyinUserUrl, enqueueSnackbar]);
+
+  const importSelectedDouyin = useCallback(async () => {
+    if (!accountId) return;
+    const urls = douyinVideos.filter((v) => douyinSelected[v.awemeId]).map((v) => v.shareUrl);
+    if (!urls.length) {
+      enqueueSnackbar('Chọn ít nhất 1 bài', { variant: 'warning' });
+      return;
+    }
+    setDouyinBusy(true);
+    try {
+      const res = await fetch(`/api/accounts/${accountId}/douyin/import/`, {
+        method: 'POST',
+        headers: authJsonHeaders(),
+        body: JSON.stringify({ urls }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || 'Không tạo được nháp');
+      enqueueSnackbar(body.message || `Đã đưa ${urls.length} bài vào hàng tạo nháp`);
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Không tạo được nháp', { variant: 'error' });
+    } finally {
+      setDouyinBusy(false);
+    }
+  }, [accountId, douyinVideos, douyinSelected, enqueueSnackbar]);
+
+  const addDouyinFollow = useCallback(async () => {
+    if (!accountId || !douyinUserUrl.trim()) return;
+    setDouyinBusy(true);
+    try {
+      const res = await fetch(`/api/accounts/${accountId}/follows/`, {
+        method: 'POST',
+        headers: authJsonHeaders(),
+        body: JSON.stringify({ url: douyinUserUrl.trim() }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || 'Không thêm được theo dõi');
+      enqueueSnackbar(body.message || 'Đã theo dõi user');
+      loadDouyinFollows();
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Không thêm được theo dõi', { variant: 'error' });
+    } finally {
+      setDouyinBusy(false);
+    }
+  }, [accountId, douyinUserUrl, enqueueSnackbar, loadDouyinFollows]);
+
+  const followAction = useCallback(
+    async (followId: string, action: { scan?: boolean; active?: boolean; del?: boolean }) => {
+      if (!accountId) return;
+      try {
+        const res = await fetch(`/api/accounts/${accountId}/follows/${followId}/`, {
+          method: action.del ? 'DELETE' : 'PATCH',
+          headers: authJsonHeaders(),
+          body: action.del ? undefined : JSON.stringify(action),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.message || 'Thao tác thất bại');
+        if (action.scan) enqueueSnackbar(body.message || 'Đã quét');
+        loadDouyinFollows();
+      } catch (error) {
+        enqueueSnackbar(error instanceof Error ? error.message : 'Thao tác thất bại', { variant: 'error' });
+      }
+    },
+    [accountId, enqueueSnackbar, loadDouyinFollows]
+  );
+
+  const createBulkSourceImports = useCallback(async () => {
+    if (!accountId || !bulkLinks.trim()) {
+      enqueueSnackbar('Dán danh sách link XSH/Douyin trước', { variant: 'warning' });
+      return;
+    }
+
+    setBulkImporting(true);
+
+    try {
+      const response = await fetch(`/api/accounts/${accountId}/source-imports/bulk/`, {
+        method: 'POST',
+        headers: authJsonHeaders(),
+        body: JSON.stringify({ text: bulkLinks, platform: sourceImportForm.platform }),
+      });
+      const body = await response.json();
+
+      if (!response.ok) throw new Error(body.message || 'Không thể tạo loạt bài từ danh sách link');
+
+      if (Array.isArray(body.data) && body.data.length) {
+        setLocalSourceImports((current) => {
+          const byId = new Map(current.map((row) => [row.id, row]));
+          body.data.forEach((row: any) => byId.set(row.id, row));
+          return Array.from(byId.values());
+        });
+        setBulkLinks('');
+      }
+
+      enqueueSnackbar(body.message || `Đã đưa ${body.summary?.queued || 0} link vào hàng xử lý`, {
+        variant: body.summary?.queued ? 'success' : 'warning',
+      });
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Không thể tạo loạt bài từ danh sách link', { variant: 'error' });
+    } finally {
+      setBulkImporting(false);
+    }
+  }, [accountId, bulkLinks, enqueueSnackbar, sourceImportForm.platform]);
+
+  const [applyingTemplate, setApplyingTemplate] = useState(false);
+  const [publishingPostId, setPublishingPostId] = useState('');
+  const [translatingPostId, setTranslatingPostId] = useState('');
+  const [deletingPostId, setDeletingPostId] = useState('');
+  const [scheduleDialog, setScheduleDialog] = useState<{ open: boolean; postId: string; currentAt: string; mode: 'gami' | 'external_tiktok_studio'; isTiktokBusiness: boolean }>({ open: false, postId: '', currentAt: '', mode: 'gami', isTiktokBusiness: false });
+  const [schedulingPostId, setSchedulingPostId] = useState('');
+
+  const applyScheduleTemplate = useCallback(async () => {
+    if (!accountId) return;
+
+    setApplyingTemplate(true);
+
+    try {
+      const response = await fetch(`/api/accounts/${accountId}/schedule-template/`, {
+        method: 'POST',
+        headers: authJsonHeaders(),
+        body: JSON.stringify({}),
+      });
+      const body = await response.json();
+
+      if (!response.ok) throw new Error(body.message || 'Không thể lên lịch');
+
+      enqueueSnackbar(body.message || 'Đã lên lịch theo template', { variant: 'success' });
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Không thể lên lịch', { variant: 'error' });
+    } finally {
+      setApplyingTemplate(false);
+    }
+  }, [accountId, enqueueSnackbar]);
+
+  const publishPostNow = useCallback(
+    async (postId: string) => {
+      if (!accountId || !postId) return;
+
+      setPublishingPostId(postId);
+
+      try {
+        const response = await fetch(`/api/accounts/${accountId}/posts/${postId}/publish-android/`, {
+          method: 'POST',
+          headers: authJsonHeaders(),
+        });
+        const body = await response.json();
+
+        if (!response.ok) throw new Error(body.message || 'Không thể đăng bài');
+
+        enqueueSnackbar(body.message || 'Đang đăng bài…', { variant: 'info' });
+      } catch (error) {
+        enqueueSnackbar(error instanceof Error ? error.message : 'Không thể đăng bài', { variant: 'error' });
+      } finally {
+        setPublishingPostId('');
+      }
+    },
+    [accountId, enqueueSnackbar]
+  );
+
+  const translatePostNow = useCallback(
+    async (postId: string) => {
+      if (!accountId || !postId) return;
+
+      setTranslatingPostId(postId);
+
+      try {
+        const response = await fetch(`/api/accounts/${accountId}/posts/${postId}/translate/`, {
+          method: 'POST',
+          headers: authJsonHeaders(),
+        });
+        const body = await response.json();
+
+        if (!response.ok) throw new Error(body.message || 'Không thể dịch bài');
+
+        enqueueSnackbar('Đã Việt hóa tiêu đề + caption', { variant: 'success' });
+      } catch (error) {
+        enqueueSnackbar(error instanceof Error ? error.message : 'Không thể dịch bài', { variant: 'error' });
+      } finally {
+        setTranslatingPostId('');
+      }
+    },
+    [accountId, enqueueSnackbar]
+  );
+
+  const deletePostNow = useCallback(
+    async (postId: string) => {
+      if (!accountId || !postId) return;
+
+      setDeletingPostId(postId);
+
+      try {
+        const response = await fetch(`/api/accounts/${accountId}/posts/${postId}/`, {
+          method: 'DELETE',
+          headers: authJsonHeaders(),
+        });
+        const body = await response.json();
+
+        if (!response.ok) throw new Error(body.message || 'Không thể xóa bài');
+
+        enqueueSnackbar('Đã xóa bài nháp', { variant: 'success' });
+      } catch (error) {
+        enqueueSnackbar(error instanceof Error ? error.message : 'Không thể xóa bài', { variant: 'error' });
+      } finally {
+        setDeletingPostId('');
+      }
+    },
+    [accountId, enqueueSnackbar]
+  );
+
+  const schedulePostAt = useCallback(
+    async (postId: string, scheduledAtStr: string, mode: 'gami' | 'external_tiktok_studio' = 'gami') => {
+      if (!accountId || !postId || !scheduledAtStr) return;
+
+      setSchedulingPostId(postId);
+
+      try {
+        if (mode === 'external_tiktok_studio') {
+          // External mode: validate client-side 15p-10 ngày
+          const scheduleMs = new Date(scheduledAtStr).getTime();
+          const now = Date.now();
+          if (scheduleMs < now + 15 * 60_000) {
+            throw new Error('TikTok Studio yêu cầu lịch tối thiểu 15 phút từ bây giờ');
+          }
+          if (scheduleMs > now + 10 * 24 * 3600_000) {
+            throw new Error('TikTok Studio yêu cầu lịch tối đa 10 ngày từ bây giờ');
+          }
+
+          // Step 1: set scheduledAt + publishMode trên DB (status sẽ thành PUBLISHING khi gọi publish-android)
+          const patchResp = await fetch(`/api/accounts/${accountId}/posts/${postId}/`, {
+            method: 'PATCH',
+            headers: authJsonHeaders(),
+            body: JSON.stringify({ scheduledAt: scheduledAtStr, publishMode: 'external_tiktok_studio' }),
+          });
+          const patchBody = await patchResp.json();
+          if (!patchResp.ok) throw new Error(patchBody.message || 'Không thể set scheduledAt');
+
+          // Step 2: trigger publish-android NGAY với publishMode để agent vào TikTok Studio set schedule.
+          const publishResp = await fetch(`/api/accounts/${accountId}/posts/${postId}/publish-android/`, {
+            method: 'POST',
+            headers: authJsonHeaders(),
+            body: JSON.stringify({ publishMode: 'external_tiktok_studio' }),
+          });
+          const publishBody = await publishResp.json();
+          if (!publishResp.ok) throw new Error(publishBody.message || 'Không thể ủy nhiệm TikTok Studio');
+
+          setScheduleDialog({ open: false, postId: '', currentAt: '', mode: 'gami', isTiktokBusiness: false });
+          enqueueSnackbar('Đang ủy nhiệm TikTok Studio đặt lịch — đợi xác nhận…', { variant: 'info' });
+        } else {
+          // Default Gami trigger mode: PATCH set scheduledAt + status=SCHEDULED, worker sẽ trigger lúc đến giờ.
+          const response = await fetch(`/api/accounts/${accountId}/posts/${postId}/`, {
+            method: 'PATCH',
+            headers: authJsonHeaders(),
+            body: JSON.stringify({ scheduledAt: scheduledAtStr, status: 'SCHEDULED', publishMode: 'gami' }),
+          });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.message || 'Không thể lên lịch');
+
+          setScheduleDialog({ open: false, postId: '', currentAt: '', mode: 'gami', isTiktokBusiness: false });
+          enqueueSnackbar('Đã lên lịch bài viết (Gami sẽ trigger)', { variant: 'success' });
+        }
+      } catch (error) {
+        enqueueSnackbar(error instanceof Error ? error.message : 'Không thể lên lịch', { variant: 'error' });
+      } finally {
+        setSchedulingPostId('');
+      }
+    },
+    [accountId, enqueueSnackbar]
+  );
+
   const updateSourceImport = useCallback(
     async (action: 'retry' | 'cancel') => {
       if (!accountId || !selectedSourceImportId) {
@@ -1358,6 +1758,9 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
           caption: postDetailForm.caption,
           scheduledAt: postDetailForm.scheduledAt || null,
           status: postDetailForm.status,
+          tiktokMusicName: postDetailForm.tiktokMusicName || null,
+          tiktokMuteOriginal: postDetailForm.tiktokMuteOriginal,
+          tiktokRandomMusic: postDetailForm.tiktokRandomMusic,
         }),
       });
       const body = await response.json();
@@ -1372,6 +1775,94 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
       setSavingPostDetail(false);
     }
   }, [accountId, canCreate, enqueueSnackbar, postDetailForm, postId]);
+
+  const runVietsub = useCallback(async () => {
+    if (!accountId || !postId) return;
+    setVietsubBusy(true);
+    setVietsubElapsed(0);
+    setVietsubProgress({ percent: 2, label: 'Đang chuẩn bị…' });
+    clearInterval(vietsubTimer.current);
+    vietsubTimer.current = setInterval(() => setVietsubElapsed((s) => s + 1), 1000);
+
+    // Poll tiến trình thật (phase do script python phát qua stderr).
+    clearInterval(vietsubPollTimer.current);
+    vietsubPollTimer.current = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/accounts/${accountId}/posts/${postId}/vietsub/progress/`, {
+          headers: authJsonHeaders(),
+        });
+        const b = await r.json();
+        if (b?.data) setVietsubProgress({ percent: b.data.percent ?? 0, label: b.data.label || '' });
+      } catch {
+        // bỏ qua lỗi poll tạm thời
+      }
+    }, 1500);
+
+    try {
+      const res = await fetch(`/api/accounts/${accountId}/posts/${postId}/vietsub/`, {
+        method: 'POST',
+        headers: authJsonHeaders(),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || 'Vietsub thất bại');
+      if (body.data) setPostDetail(body.data);
+      enqueueSnackbar(body.message || 'Đã tạo bản vietsub');
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Vietsub thất bại', { variant: 'error' });
+    } finally {
+      clearInterval(vietsubTimer.current);
+      clearInterval(vietsubPollTimer.current);
+      setVietsubProgress(null);
+      setVietsubBusy(false);
+    }
+  }, [accountId, postId, enqueueSnackbar]);
+
+  const removeVietsub = useCallback(async () => {
+    if (!accountId || !postId) return;
+    setVietsubBusy(true);
+    try {
+      const res = await fetch(`/api/accounts/${accountId}/posts/${postId}/vietsub/`, {
+        method: 'DELETE',
+        headers: authJsonHeaders(),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || 'Không thể xoá bản vietsub');
+      if (body.data) setPostDetail(body.data);
+      enqueueSnackbar(body.message || 'Đã xoá bản vietsub');
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Không thể xoá bản vietsub', { variant: 'error' });
+    } finally {
+      setVietsubBusy(false);
+    }
+  }, [accountId, postId, enqueueSnackbar]);
+
+  const saveFavoriteMusic = useCallback(async () => {
+    if (!canAdmin || !accountId) return;
+
+    setSavingFavMusic(true);
+
+    try {
+      const list = favMusicDraft
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const response = await fetch(`/api/accounts/${accountId}/`, {
+        method: 'PATCH',
+        headers: authJsonHeaders(),
+        body: JSON.stringify({ tiktokFavoriteMusic: list }),
+      });
+      const body = await response.json();
+
+      if (!response.ok) throw new Error(body.message || 'Không thể lưu danh sách nhạc');
+
+      setAccount((current: any) => (current ? { ...current, tiktokFavoriteMusic: list } : current));
+      enqueueSnackbar('Đã lưu danh sách nhạc yêu thích');
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Không thể lưu danh sách nhạc', { variant: 'error' });
+    } finally {
+      setSavingFavMusic(false);
+    }
+  }, [accountId, canAdmin, enqueueSnackbar, favMusicDraft]);
 
   const assignDevice = useCallback(async () => {
     if (!canAdmin || !accountId) return;
@@ -1518,38 +2009,281 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
       </Grid>
 
       <Card>
-        <CardHeader title="Tạo bài từ nguồn" />
+        <CardHeader title="Tạo bài đăng" />
+        <Tabs
+          value={createTab}
+          onChange={(_, value) => setCreateTab(value)}
+          sx={{ px: 2, borderBottom: (theme) => `1px solid ${theme.palette.divider}` }}
+        >
+          <Tab value="bulk" label="Từ danh sách link" />
+          <Tab value="single" label="Từ 1 link" />
+          <Tab value="history" label={`Lịch sử chuyển${mergedSourceImports.length ? ` (${mergedSourceImports.length})` : ''}`} />
+        </Tabs>
         <CardContent>
-          <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} md={7}>
+          {createTab === 'single' && (
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={12} md={7}>
+                <TextField
+                  fullWidth
+                  label="Link XSH hoặc Douyin"
+                  value={sourceImportForm.url}
+                  onChange={updateSourceImportForm('url')}
+                  placeholder="https://xhslink.com/... hoặc link Douyin"
+                />
+              </Grid>
+              <Grid item xs={12} md={2}>
+                <TextField fullWidth select label="Nền tảng" value={sourceImportForm.platform} onChange={updateSourceImportForm('platform')}>
+                  <MenuItem value="auto">Tự nhận diện</MenuItem>
+                  <MenuItem value="xsh">XSH</MenuItem>
+                  <MenuItem value="douyin">Douyin</MenuItem>
+                </TextField>
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <Button
+                  fullWidth
+                  size="large"
+                  variant="contained"
+                  disabled={!canCreate || importingSource || !sourceImportForm.url.trim()}
+                  onClick={createSourceImport}
+                  startIcon={<Iconify icon={importingSource ? 'solar:refresh-bold' : 'solar:download-minimalistic-bold'} />}
+                >
+                  {importingSource ? 'Đang tạo nháp' : 'Tải và tạo nháp'}
+                </Button>
+              </Grid>
+            </Grid>
+          )}
+
+          {createTab === 'bulk' && (
+            <Grid container spacing={2} alignItems="flex-start">
+              <Grid item xs={12} md={2}>
+                <TextField fullWidth select label="Nền tảng" value={sourceImportForm.platform} onChange={updateSourceImportForm('platform')}>
+                  <MenuItem value="auto">Tự nhận diện</MenuItem>
+                  <MenuItem value="xsh">XSH</MenuItem>
+                  <MenuItem value="douyin">Douyin</MenuItem>
+                </TextField>
+              </Grid>
+              <Grid item xs={12} md={10}>
+                <TextField
+                  fullWidth
+                  multiline
+                  minRows={5}
+                  maxRows={14}
+                  label="Danh sách link (mỗi link 1 dòng)"
+                  value={bulkLinks}
+                  onChange={(event) => setBulkLinks(event.target.value)}
+                  placeholder={'https://www.xiaohongshu.com/explore/...\nhttps://www.xiaohongshu.com/explore/...'}
+                  helperText="Tự nhận diện XSH/Douyin, bỏ qua link trùng/không hợp lệ. Tiêu đề sẽ được Việt hóa qua 9router."
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <Button
+                  size="large"
+                  variant="contained"
+                  disabled={!canCreate || bulkImporting || !bulkLinks.trim()}
+                  onClick={createBulkSourceImports}
+                  startIcon={<Iconify icon={bulkImporting ? 'solar:refresh-bold' : 'solar:playlist-bold'} />}
+                >
+                  {bulkImporting ? 'Đang đưa vào hàng xử lý' : 'Tạo loạt bài từ danh sách'}
+                </Button>
+              </Grid>
+            </Grid>
+          )}
+
+          {createTab === 'history' && (
+            <Stack spacing={1}>
+              {mergedSourceImports.length ? (
+                mergedSourceImports.map((imp: any) => {
+                  const meta = sourceImportStatusMeta(imp.status);
+
+                  return (
+                    <Stack
+                      key={imp.id}
+                      direction={{ xs: 'column', sm: 'row' }}
+                      spacing={1.5}
+                      alignItems={{ sm: 'center' }}
+                      sx={{ p: 1.25, border: (theme) => `1px solid ${theme.palette.divider}`, borderRadius: 1 }}
+                    >
+                      <Chip size="small" color={meta.color} label={meta.label} sx={{ minWidth: 120 }} />
+                      <Stack spacing={0.25} sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>
+                          {imp.translatedTitle || imp.sourceTitle || imp.sourceUrl}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" noWrap>
+                          {imp.sourceUrl}
+                        </Typography>
+                        {imp.status === 'FAILED' && imp.errorMessage && (
+                          <Typography variant="caption" color="error.main" noWrap>
+                            {imp.errorMessage}
+                          </Typography>
+                        )}
+                      </Stack>
+                      <Stack direction="row" spacing={0.5}>
+                        <Button size="small" color="inherit" href={imp.sourceUrl} target="_blank" rel="noopener">
+                          Nguồn
+                        </Button>
+                        {imp.postId ? (
+                          <Button size="small" variant="outlined" href={`${paths.dashboard.accounts}/${accountId}/posts/${imp.postId}`}>
+                            Xem nháp
+                          </Button>
+                        ) : imp.status === 'FAILED' ? (
+                          <Button
+                            size="small"
+                            color="warning"
+                            onClick={async () => {
+                              try {
+                                const res = await fetch(`/api/accounts/${accountId}/source-imports/${imp.id}/retry/`, {
+                                  method: 'POST',
+                                  headers: authJsonHeaders(),
+                                });
+                                const body = await res.json();
+                                if (!res.ok) throw new Error(body.message || 'Không thể thử lại');
+                                if (body.data) setLocalSourceImports((cur) => [body.data, ...cur.filter((r) => r.id !== body.data.id)]);
+                                enqueueSnackbar('Đã đưa lại vào hàng xử lý');
+                              } catch (error) {
+                                enqueueSnackbar(error instanceof Error ? error.message : 'Không thể thử lại', { variant: 'error' });
+                              }
+                            }}
+                          >
+                            Thử lại
+                          </Button>
+                        ) : null}
+                      </Stack>
+                    </Stack>
+                  );
+                })
+              ) : (
+                <Box sx={{ p: 3, textAlign: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Chưa có lịch sử chuyển link.
+                  </Typography>
+                </Box>
+              )}
+            </Stack>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Douyin: lấy bài theo user"
+          subheader="Dán link profile user Douyin để liệt kê bài và chọn tạo nháp, hoặc theo dõi để tự kéo bài mới mỗi ngày."
+        />
+        <CardContent>
+          <Stack spacing={2}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
               <TextField
                 fullWidth
-                label="Link XSH hoặc Douyin"
-                value={sourceImportForm.url}
-                onChange={updateSourceImportForm('url')}
-                placeholder="https://xhslink.com/... hoặc link Douyin"
+                size="small"
+                label="Link user Douyin (vd https://v.douyin.com/xxxx/)"
+                value={douyinUserUrl}
+                onChange={(event) => setDouyinUserUrl(event.target.value)}
               />
-            </Grid>
-            <Grid item xs={12} md={2}>
-              <TextField fullWidth select label="Nền tảng" value={sourceImportForm.platform} onChange={updateSourceImportForm('platform')}>
-                <MenuItem value="auto">Tự nhận diện</MenuItem>
-                <MenuItem value="xsh">XSH</MenuItem>
-                <MenuItem value="douyin">Douyin</MenuItem>
-              </TextField>
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <Button
-                fullWidth
-                size="large"
-                variant="contained"
-                disabled={!canCreate || importingSource || !sourceImportForm.url.trim()}
-                onClick={createSourceImport}
-                startIcon={<Iconify icon={importingSource ? 'solar:refresh-bold' : 'solar:download-minimalistic-bold'} />}
-              >
-                {importingSource ? 'Đang tạo nháp' : 'Tải và tạo nháp'}
+              <Button variant="contained" disabled={!douyinUserUrl.trim() || douyinBusy} onClick={listDouyinUser}>
+                Liệt kê bài
               </Button>
-            </Grid>
-          </Grid>
+              <Button variant="outlined" disabled={!douyinUserUrl.trim() || douyinBusy} onClick={addDouyinFollow}>
+                ＋ Theo dõi
+              </Button>
+            </Stack>
+
+            {douyinBusy && (
+              <Stack spacing={0.75}>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <CircularProgress size={16} />
+                  <Typography variant="body2" color="text.secondary">
+                    Đang mở trang user và quét bài… {douyinElapsed}s (thường mất 20–40s)
+                  </Typography>
+                </Stack>
+                <LinearProgress />
+              </Stack>
+            )}
+
+            {douyinVideos.length > 0 && (
+              <Stack spacing={1}>
+                <Stack direction="row" alignItems="center" justifyContent="space-between">
+                  <Typography variant="subtitle2">
+                    {douyinNickname || 'User'} · {douyinReveal < douyinVideos.length ? `${douyinReveal}/` : ''}
+                    {douyinVideos.length} bài
+                  </Typography>
+                  <Button
+                    size="small"
+                    variant="contained"
+                    disabled={douyinBusy}
+                    onClick={importSelectedDouyin}
+                  >
+                    Tạo nháp từ bài đã chọn
+                  </Button>
+                </Stack>
+                <Box sx={{ maxHeight: 320, overflow: 'auto', border: (theme) => `1px solid ${theme.palette.divider}`, borderRadius: 1 }}>
+                  {douyinVideos.slice(0, douyinReveal).map((v: any) => (
+                    <Stack
+                      key={v.awemeId}
+                      direction="row"
+                      spacing={1}
+                      alignItems="center"
+                      sx={{ p: 1, borderBottom: (theme) => `1px solid ${theme.palette.divider}` }}
+                    >
+                      <Checkbox
+                        size="small"
+                        checked={Boolean(douyinSelected[v.awemeId])}
+                        onChange={(event) =>
+                          setDouyinSelected((cur) => ({ ...cur, [v.awemeId]: event.target.checked }))
+                        }
+                      />
+                      <Stack spacing={0.25} sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="body2" noWrap>
+                          {v.desc || '(không mô tả)'}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {v.createTime ? new Date(v.createTime * 1000).toLocaleString() : ''}
+                        </Typography>
+                      </Stack>
+                      <Button size="small" color="inherit" href={v.shareUrl} target="_blank" rel="noopener">
+                        Xem
+                      </Button>
+                    </Stack>
+                  ))}
+                </Box>
+              </Stack>
+            )}
+
+            {douyinFollows.length > 0 && (
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">Đang theo dõi ({douyinFollows.length})</Typography>
+                {douyinFollows.map((f: any) => (
+                  <Stack
+                    key={f.id}
+                    direction={{ xs: 'column', sm: 'row' }}
+                    spacing={1}
+                    alignItems={{ sm: 'center' }}
+                    sx={{ p: 1, border: (theme) => `1px solid ${theme.palette.divider}`, borderRadius: 1 }}
+                  >
+                    <Stack spacing={0.25} sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>
+                        {f.nickname}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" noWrap>
+                        {f.lastSyncAt ? `Quét: ${new Date(f.lastSyncAt).toLocaleString()}` : 'Chưa quét'}
+                        {f.lastError ? ` · Lỗi: ${f.lastError}` : ''}
+                      </Typography>
+                    </Stack>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <Chip size="small" color={f.active ? 'success' : 'default'} label={f.active ? 'Bật' : 'Tắt'} />
+                      <Button size="small" disabled={douyinBusy} onClick={() => followAction(f.id, { scan: true })}>
+                        Quét ngay
+                      </Button>
+                      <Button size="small" color="inherit" onClick={() => followAction(f.id, { active: !f.active })}>
+                        {f.active ? 'Tắt' : 'Bật'}
+                      </Button>
+                      <Button size="small" color="error" onClick={() => followAction(f.id, { del: true })}>
+                        Xóa
+                      </Button>
+                    </Stack>
+                  </Stack>
+                ))}
+              </Stack>
+            )}
+          </Stack>
         </CardContent>
       </Card>
 
@@ -1588,34 +2322,155 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
                       ))}
                     </TextField>
                   </Stack>
-                  <Stack direction="row" spacing={1}>
+                  {account?.platformCode === 'TIKTOK' && (
+                    <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ md: 'center' }}>
+                      <TextField
+                        fullWidth
+                        select
+                        label="Nhạc (từ Yêu thích trên app)"
+                        value={postDetailForm.tiktokRandomMusic ? '__random__' : postDetailForm.tiktokMusicName}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setPostDetailForm((current) => ({
+                            ...current,
+                            tiktokRandomMusic: value === '__random__',
+                            tiktokMusicName: value === '__random__' ? '' : value,
+                          }));
+                        }}
+                        helperText="Agent chọn bài trong tab Yêu thích. Không thấy → lưu nháp, không đăng."
+                      >
+                        <MenuItem value="">(Giữ nguyên — không ghép nhạc)</MenuItem>
+                        <MenuItem value="__random__">🎲 Ngẫu nhiên từ danh sách Yêu thích</MenuItem>
+                        {(account?.tiktokFavoriteMusic || []).map((song: string) => (
+                          <MenuItem key={song} value={song}>
+                            {song}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                      <FormControlLabel
+                        sx={{ flexShrink: 0 }}
+                        control={
+                          <Switch
+                            checked={postDetailForm.tiktokMuteOriginal}
+                            disabled={!postDetailForm.tiktokMusicName && !postDetailForm.tiktokRandomMusic}
+                            onChange={(event) =>
+                              setPostDetailForm((current) => ({ ...current, tiktokMuteOriginal: event.target.checked }))
+                            }
+                          />
+                        }
+                        label="Tắt tiếng gốc"
+                      />
+                    </Stack>
+                  )}
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
                     <Button variant="contained" disabled={!canCreate || savingPostDetail} onClick={savePostDetail}>
                       Lưu thay đổi
                     </Button>
+                    <Button
+                      variant="outlined"
+                      color="secondary"
+                      disabled={!canCreate || vietsubBusy}
+                      startIcon={vietsubBusy ? <CircularProgress size={16} /> : <Iconify icon="solar:subtitles-bold" />}
+                      onClick={runVietsub}
+                    >
+                      {vietsubBusy ? `Đang vietsub… ${vietsubElapsed}s` : 'Vietsub (phụ đề Việt)'}
+                    </Button>
+                    {postDetail?.media?.some((m: any) => m.category === 'vietsub') && (
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        disabled={!canCreate || vietsubBusy}
+                        startIcon={<Iconify icon="solar:trash-bin-trash-bold" />}
+                        onClick={removeVietsub}
+                      >
+                        Xoá bản vietsub
+                      </Button>
+                    )}
                     <Button variant="outlined" href={`${paths.dashboard.accounts}/${accountId}`}>
                       Quay lại workspace
                     </Button>
                   </Stack>
+                  {vietsubBusy && (
+                    <Box sx={{ width: '100%', maxWidth: 420 }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.5 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          {vietsubProgress?.label || 'Đang xử lý vietsub…'}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {vietsubProgress ? `${Math.round(vietsubProgress.percent)}% · ` : ''}{vietsubElapsed}s
+                        </Typography>
+                      </Stack>
+                      <LinearProgress
+                        variant={vietsubProgress ? 'determinate' : 'indeterminate'}
+                        value={vietsubProgress?.percent ?? 0}
+                      />
+                    </Box>
+                  )}
                 </Stack>
               </Grid>
               <Grid item xs={12} md={4}>
                 <Stack spacing={2}>
                   <Typography variant="subtitle2">Media</Typography>
                   {postDetail?.media?.length ? (
-                    postDetail.media.map((asset: any) => (
-                      <Box key={asset.id} sx={{ p: 1.5, border: (theme) => `1px solid ${theme.palette.divider}`, borderRadius: 1 }}>
-                        <Typography variant="body2" noWrap>
-                          {asset.name}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {asset.type} · {asset.folder}
-                        </Typography>
-                      </Box>
-                    ))
+                    postDetail.media.map((asset: any) => {
+                      const isVietsub = asset.category === 'vietsub';
+                      // Video gốc bị thay thế khi bài có ít nhất 1 bản vietsub.
+                      const hasVietsub = postDetail.media.some((m: any) => m.category === 'vietsub');
+                      const superseded = !isVietsub && asset.isVideo && hasVietsub;
+                      return (
+                        <Box
+                          key={asset.id}
+                          sx={{
+                            p: 1.5,
+                            border: (theme) => `1px solid ${theme.palette.divider}`,
+                            borderRadius: 1,
+                            opacity: superseded ? 0.55 : 1,
+                          }}
+                        >
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <Typography variant="body2" noWrap sx={{ flexGrow: 1 }}>
+                              {asset.name}
+                            </Typography>
+                            {isVietsub && <Chip size="small" color="success" label="Vietsub — sẽ đăng bản này" />}
+                            {superseded && <Chip size="small" variant="outlined" label="Bản gốc — bỏ qua khi đăng" />}
+                          </Stack>
+                          <Typography variant="caption" color="text.secondary">
+                            {asset.type} · {asset.folder}
+                          </Typography>
+                        </Box>
+                      );
+                    })
                   ) : (
                     <Typography variant="body2" color="text.secondary">
                       Chưa có media gắn với bài này.
                     </Typography>
+                  )}
+
+                  {account?.platformCode === 'TIKTOK' && (
+                    <Box sx={{ pt: 1 }}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Nhạc yêu thích (TikTok)
+                      </Typography>
+                      <TextField
+                        fullWidth
+                        multiline
+                        minRows={3}
+                        size="small"
+                        placeholder="Mỗi dòng 1 tên bài, đúng tên trong Yêu thích trên app"
+                        value={favMusicDraft}
+                        onChange={(event) => setFavMusicDraft(event.target.value)}
+                        disabled={!canAdmin}
+                      />
+                      <Button
+                        size="small"
+                        sx={{ mt: 1 }}
+                        variant="outlined"
+                        disabled={!canAdmin || savingFavMusic}
+                        onClick={saveFavoriteMusic}
+                      >
+                        Lưu danh sách nhạc
+                      </Button>
+                    </Box>
                   )}
                 </Stack>
               </Grid>
@@ -1669,11 +2524,220 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
         </Card>
       )}
 
+      <Card>
+        <CardHeader
+          title="Bài đăng"
+          action={
+            <Button
+              size="small"
+              variant="contained"
+              disabled={!canCreate || applyingTemplate || !draftPostRows.length}
+              onClick={applyScheduleTemplate}
+              startIcon={<Iconify icon="solar:calendar-add-bold" />}
+            >
+              {applyingTemplate ? 'Đang lên lịch' : 'Áp lịch (19h–22h30, cách 30p)'}
+            </Button>
+          }
+        />
+        <Tabs
+          value={postsTab}
+          onChange={(_, value) => setPostsTab(value)}
+          sx={{ px: 2, borderBottom: (theme) => `1px solid ${theme.palette.divider}` }}
+        >
+          {postsTabConfig.map((tab) => (
+            <Tab key={tab.value} value={tab.value} label={`${tab.label} (${tab.rows.length})`} />
+          ))}
+        </Tabs>
+        <CardContent>
+          {activePostsTab.rows.length ? (
+            <Grid container spacing={2}>
+              {activePostsTab.rows.map((post: any) => (
+                <Grid item xs={6} sm={3} md={2} key={post.id}>
+                  <Card
+                    variant="outlined"
+                    component={NextLink}
+                    href={`${paths.dashboard.accounts}/${accountId}/posts/${post.id}`}
+                    sx={{
+                      height: '100%',
+                      display: 'block',
+                      color: 'inherit',
+                      textDecoration: 'none',
+                      transition: (theme) => theme.transitions.create(['box-shadow', 'transform'], { duration: theme.transitions.duration.shorter }),
+                      '&:hover': { boxShadow: 6, transform: 'translateY(-2px)' },
+                    }}
+                  >
+                    <Box sx={{ aspectRatio: '3 / 4', bgcolor: 'grey.900', position: 'relative', overflow: 'hidden' }}>
+                      {post.coverUrl ? (
+                        <Box
+                          component="img"
+                          src={post.coverUrl}
+                          alt={post.title}
+                          loading="lazy"
+                          decoding="async"
+                          onError={(event: any) => {
+                            event.currentTarget.style.display = 'none';
+                          }}
+                          sx={{ width: 1, height: 1, objectFit: 'cover', display: 'block' }}
+                        />
+                      ) : (
+                        <Stack alignItems="center" justifyContent="center" sx={{ height: 1, color: 'grey.500' }}>
+                          <Iconify icon={post.coverIsVideo ? 'solar:videocamera-bold' : 'solar:gallery-bold'} width={40} />
+                        </Stack>
+                      )}
+
+                      <Box sx={{ position: 'absolute', top: 6, left: 6 }}>
+                        <StatusChip value={post.status} />
+                      </Box>
+
+                      {post.coverIsVideo && post.coverUrl && (
+                        <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'common.white' }}>
+                          <Iconify icon="solar:play-circle-bold" width={48} />
+                        </Box>
+                      )}
+
+                      {post.mediaCount > 1 && (
+                        <Chip
+                          size="small"
+                          icon={<Iconify icon="solar:gallery-bold" width={14} /> as any}
+                          label={post.mediaCount}
+                          sx={{ position: 'absolute', top: 6, right: 6, height: 24, bgcolor: 'rgba(0,0,0,0.6)', color: 'common.white' }}
+                        />
+                      )}
+                    </Box>
+
+                    <CardContent sx={{ p: 1.25 }}>
+                      <Stack spacing={0.5}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700, lineHeight: 1.25, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                          {post.title || '(Chưa có tiêu đề)'}
+                        </Typography>
+                        {post.caption && (
+                          <Typography variant="caption" color="text.secondary" sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                            {post.caption}
+                          </Typography>
+                        )}
+                        <Typography variant="caption" color="text.disabled" noWrap>
+                          {post.status === 'PUBLISHED'
+                            ? `Đã đăng: ${post.publishedAt}`
+                            : post.scheduledAt
+                              ? `Lịch: ${post.scheduledAt}`
+                              : post.createdAt}
+                        </Typography>
+                        {post.status === 'FAILED' && post.lastPublishError && (
+                          <Typography variant="caption" color="error.main" sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                            Lỗi ({post.publishAttempts}/5): {post.lastPublishError}
+                          </Typography>
+                        )}
+                        {post.status !== 'PUBLISHED' && post.status !== 'PUBLISHING' && (
+                          <Stack direction="row" spacing={0.5} sx={{ mt: 0.5 }} justifyContent="flex-end">
+                            <Tooltip title="Việt hóa tiêu đề + caption" arrow>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  color="info"
+                                  disabled={!canCreate || translatingPostId === post.id || publishingPostId === post.id}
+                                  onClick={(event: any) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    translatePostNow(post.id);
+                                  }}
+                                  sx={{ border: (theme) => `1px solid ${theme.palette.divider}`, borderRadius: 1 }}
+                                >
+                                  <Iconify
+                                    icon={translatingPostId === post.id ? 'solar:refresh-bold' : 'solar:translation-bold'}
+                                    width={15}
+                                  />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title="Lên lịch đăng" arrow>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  color="secondary"
+                                  disabled={!canCreate || schedulingPostId === post.id || deletingPostId === post.id || publishingPostId === post.id}
+                                  onClick={(event: any) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setScheduleDialog({
+                                      open: true,
+                                      postId: post.id,
+                                      currentAt: post.scheduledAtRaw || '',
+                                      mode: 'gami',
+                                      isTiktokBusiness: account?.type === 'TIKTOK_BUSINESS',
+                                    });
+                                  }}
+                                  sx={{ border: (theme) => `1px solid ${theme.palette.divider}`, borderRadius: 1 }}
+                                >
+                                  <Iconify
+                                    icon={schedulingPostId === post.id ? 'solar:refresh-bold' : 'solar:calendar-add-bold'}
+                                    width={15}
+                                  />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title="Đăng ngay lên Facebook" arrow>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  color="primary"
+                                  disabled={!canCreate || publishingPostId === post.id || translatingPostId === post.id || deletingPostId === post.id}
+                                  onClick={(event: any) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    publishPostNow(post.id);
+                                  }}
+                                  sx={{ border: (theme) => `1px solid ${theme.palette.divider}`, borderRadius: 1 }}
+                                >
+                                  <Iconify
+                                    icon={publishingPostId === post.id ? 'solar:refresh-bold' : 'solar:upload-bold'}
+                                    width={15}
+                                  />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title="Xóa bài nháp" arrow>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  color="error"
+                                  disabled={!canCreate || deletingPostId === post.id || publishingPostId === post.id}
+                                  onClick={(event: any) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    if (window.confirm('Xóa bài nháp này?')) deletePostNow(post.id);
+                                  }}
+                                  sx={{ border: (theme) => `1px solid ${theme.palette.divider}`, borderRadius: 1 }}
+                                >
+                                  <Iconify
+                                    icon={deletingPostId === post.id ? 'solar:refresh-bold' : 'solar:trash-bin-trash-bold'}
+                                    width={15}
+                                  />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          </Stack>
+                        )}
+                        {post.status === 'PUBLISHING' && (
+                          <Chip size="small" color="info" label="Đang đăng…" sx={{ mt: 0.5, height: 24 }} />
+                        )}
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+          ) : (
+            <Box sx={{ p: 4, textAlign: 'center' }}>
+              <Typography variant="body2" color="text.secondary">
+                Chưa có {activePostsTab.label.toLowerCase()}.
+              </Typography>
+            </Box>
+          )}
+        </CardContent>
+      </Card>
+
       <Grid container spacing={3}>
         <Grid item xs={12} lg={8}>
-          <DataCard title="Bài đăng của tài khoản" rows={postRows} columns={workspacePostColumns} />
-        </Grid>
-        <Grid item xs={12} lg={4}>
           <Stack spacing={2}>
             {showDeviceManager && (
               <Stack direction="row" spacing={2}>
@@ -1704,41 +2768,71 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
             />
           </Stack>
         </Grid>
-        <Grid item xs={12} md={6}>
-          <DataCard title="Media theo tài khoản" rows={mediaRows} columns={mediaColumns.slice(0, 5)} />
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <DataCard title="Nguồn nội dung" rows={sourceRows} columns={sourceColumns} />
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <Stack spacing={2}>
-            <Stack direction="row" spacing={1}>
-              <Button variant="outlined" disabled={!canCreate || !selectedSourceImportId} onClick={() => updateSourceImport('retry')}>
-                Retry
-              </Button>
-              <Button
-                variant="outlined"
-                color="error"
-                disabled={!canCreate || !selectedSourceImportId}
-                onClick={() => updateSourceImport('cancel')}
-              >
-                Hủy
-              </Button>
-            </Stack>
-            <DataCard
-              title="Import từ link nguồn"
-              rows={mergedSourceImports}
-              columns={sourceImportColumns}
-              checkboxSelection
-              rowSelectionModel={selectedSourceImportRows}
-              onRowSelectionModelChange={setSelectedSourceImportRows}
-            />
-          </Stack>
-        </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid item xs={12} lg={4}>
           <DataCard title="Jobs theo tài khoản" rows={jobRows} columns={jobColumns.slice(0, 4)} />
         </Grid>
       </Grid>
+
+        <Dialog open={scheduleDialog.open} onClose={() => setScheduleDialog({ open: false, postId: '', currentAt: '', mode: 'gami', isTiktokBusiness: false })} fullWidth maxWidth="xs">
+          <DialogTitle>Lên lịch đăng</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              {scheduleDialog.isTiktokBusiness && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                    Phương thức lên lịch
+                  </Typography>
+                  <Stack direction="column" spacing={0.5}>
+                    <Stack
+                      direction="row"
+                      alignItems="center"
+                      spacing={1}
+                      onClick={() => setScheduleDialog((cur) => ({ ...cur, mode: 'gami' }))}
+                      sx={{ p: 1, border: (theme) => `1px solid ${scheduleDialog.mode === 'gami' ? theme.palette.primary.main : theme.palette.divider}`, borderRadius: 1, cursor: 'pointer' }}
+                    >
+                      <Iconify icon={scheduleDialog.mode === 'gami' ? 'solar:radio-button-bold' : 'solar:circle-bold'} width={16} />
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>Gami trigger</Typography>
+                        <Typography variant="caption" color="text.secondary">Đến giờ, Gami mở app + đăng. Linh hoạt nhưng tốn LLM mỗi lần.</Typography>
+                      </Box>
+                    </Stack>
+                    <Stack
+                      direction="row"
+                      alignItems="center"
+                      spacing={1}
+                      onClick={() => setScheduleDialog((cur) => ({ ...cur, mode: 'external_tiktok_studio' }))}
+                      sx={{ p: 1, border: (theme) => `1px solid ${scheduleDialog.mode === 'external_tiktok_studio' ? theme.palette.primary.main : theme.palette.divider}`, borderRadius: 1, cursor: 'pointer' }}
+                    >
+                      <Iconify icon={scheduleDialog.mode === 'external_tiktok_studio' ? 'solar:radio-button-bold' : 'solar:circle-bold'} width={16} />
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>TikTok Studio tự đăng</Typography>
+                        <Typography variant="caption" color="text.secondary">Bây giờ Gami vào Studio set lịch. TikTok tự đăng vào giờ. (15p–10 ngày)</Typography>
+                      </Box>
+                    </Stack>
+                  </Stack>
+                </Box>
+              )}
+              <TextField
+                label="Thời gian đăng"
+                type="datetime-local"
+                fullWidth
+                value={scheduleDialog.currentAt}
+                onChange={(event) => setScheduleDialog((cur) => ({ ...cur, currentAt: event.target.value }))}
+                InputLabelProps={{ shrink: true }}
+                autoFocus
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button color="inherit" onClick={() => setScheduleDialog({ open: false, postId: '', currentAt: '', mode: 'gami', isTiktokBusiness: false })}>
+              Hủy
+            </Button>
+            <Button variant="contained" onClick={() => schedulePostAt(scheduleDialog.postId, scheduleDialog.currentAt, scheduleDialog.mode)} disabled={schedulingPostId === scheduleDialog.postId || !scheduleDialog.currentAt}>
+              {scheduleDialog.mode === 'external_tiktok_studio' ? 'Ủy nhiệm TikTok' : 'Lên lịch'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
     </Stack>
   );
 }
@@ -1797,169 +2891,6 @@ const deviceColumns: GridColDef[] = [
   },
 ];
 
-function DeviceProfileDetails({ device }: { device: any }) {
-  const items = [
-    ['Device', device.name],
-    ['Profile', device.profileName],
-    ['Loại', device.type],
-    ['Provider', device.provider],
-    ['External / ADB ID', device.externalId],
-    ['Proxy/IP', device.proxySummary],
-    ['Trạng thái', device.status],
-    ['Health', device.healthStatus],
-    ['Khóa', device.locked ? 'LOCKED' : 'OPEN'],
-    ['Seen cuối', device.lastSeenAt],
-    ['Social verified', device.accounts || 'Chưa xác minh'],
-    ['Role', device.role],
-    ['Primary', device.isPrimary ? 'PRIMARY' : 'BACKUP'],
-  ].filter(([, value]) => value !== undefined && value !== null && value !== '');
-
-  return (
-    <Card>
-      <CardHeader title="Thông tin profile" />
-      <CardContent>
-        <Grid container spacing={2}>
-          {items.map(([label, value]) => (
-            <Grid key={label} item xs={12} sm={6} md={4}>
-              <Typography variant="caption" color="text.secondary">
-                {label}
-              </Typography>
-              <Typography variant="body2" sx={{ mt: 0.5, wordBreak: 'break-word' }}>
-                {String(value)}
-              </Typography>
-            </Grid>
-          ))}
-        </Grid>
-      </CardContent>
-    </Card>
-  );
-}
-
-function compactDeviceColumns(expandedDeviceId: string, onToggle: (deviceId: string) => void): GridColDef[] {
-  return [
-    { field: 'name', headerName: 'Device', flex: 1, minWidth: 220 },
-    { field: 'profileName', headerName: 'Profile', flex: 1, minWidth: 180 },
-    { field: 'proxySummary', headerName: 'Proxy/IP', width: 190 },
-    {
-      field: 'healthStatus',
-      headerName: 'Health',
-      width: 120,
-      renderCell: (params) => <StatusChip value={params.value || 'UNKNOWN'} />,
-    },
-    {
-      field: 'verifiedSocialAccounts',
-      headerName: 'Social',
-      width: 120,
-      renderCell: (params) => <SocialAccountChips accounts={params.value || []} deviceId={params.row.id} />,
-    },
-    {
-      field: 'locked',
-      headerName: 'Khóa',
-      width: 95,
-      renderCell: (params) => <StatusChip value={params.value ? 'LOCKED' : 'OPEN'} />,
-    },
-    {
-      field: 'detailToggle',
-      headerName: '',
-      width: 60,
-      sortable: false,
-      renderCell: (params) => {
-        const isExpanded = expandedDeviceId === params.row.id;
-
-        return (
-          <Tooltip title={isExpanded ? 'Ẩn thông tin đầy đủ' : 'Xem thông tin đầy đủ'} arrow>
-            <IconButton size="small" onClick={() => onToggle(params.row.id)}>
-              <Iconify icon={isExpanded ? 'solar:alt-arrow-up-bold' : 'solar:alt-arrow-down-bold'} width={18} />
-            </IconButton>
-          </Tooltip>
-        );
-      },
-    },
-    {
-      field: 'detail',
-      headerName: '',
-      width: 90,
-      sortable: false,
-      renderCell: (params) => (
-        <Button size="small" href={paths.dashboard.deviceDetails(params.row.id)}>
-          View
-        </Button>
-      ),
-    },
-  ];
-}
-
-function DeviceHubCard({
-  title,
-  icon,
-  href,
-}: {
-  title: string;
-  icon: string;
-  href: string;
-}) {
-  return (
-    <Card>
-      <CardContent
-        component="a"
-        href={href}
-        sx={{
-          display: 'block',
-          color: 'inherit',
-          textDecoration: 'none',
-          '&:hover': { bgcolor: 'action.hover' },
-        }}
-      >
-        <Stack direction="row" alignItems="center" spacing={2}>
-            <Box
-              sx={{
-                width: 56,
-                height: 56,
-                borderRadius: 1,
-                display: 'grid',
-                placeItems: 'center',
-                bgcolor: 'background.neutral',
-              }}
-            >
-              <Iconify icon={icon} width={30} />
-            </Box>
-            <Box>
-              <Typography variant="h6">{title}</Typography>
-            </Box>
-        </Stack>
-      </CardContent>
-    </Card>
-  );
-}
-
-function DevicesModule() {
-  return (
-    <Grid container spacing={3}>
-      <Grid item xs={12} md={4}>
-        <DeviceHubCard
-          title="MostLogin"
-          icon="solar:monitor-bold-duotone"
-          href={paths.dashboard.devicesMostLogin}
-        />
-      </Grid>
-      <Grid item xs={12} md={4}>
-        <DeviceHubCard
-          title="Android Devices"
-          icon="solar:smartphone-2-bold-duotone"
-          href={paths.dashboard.devicesAndroid}
-        />
-      </Grid>
-      <Grid item xs={12} md={4}>
-        <DeviceHubCard
-          title="Thêm device"
-          icon="solar:add-circle-bold-duotone"
-          href={paths.dashboard.devicesAdd}
-        />
-      </Grid>
-    </Grid>
-  );
-}
-
 function DeviceListModule({
   canAdmin,
   provider,
@@ -1981,9 +2912,6 @@ function DeviceListModule({
   const [createdDevices, setCreatedDevices] = useState<any[]>([]);
   const [syncedDevices, setSyncedDevices] = useState<any[]>([]);
   const [updatedDevices, setUpdatedDevices] = useState<Record<string, any>>({});
-  const [selectedRows, setSelectedRows] = useState<GridRowSelectionModel>([]);
-  const [expandedDeviceId, setExpandedDeviceId] = useState('');
-  const [runningAction, setRunningAction] = useState<string>('');
   const [creating, setCreating] = useState(false);
   const [syncingProfiles, setSyncingProfiles] = useState(false);
   const [syncingAndroid, setSyncingAndroid] = useState(false);
@@ -2002,12 +2930,7 @@ function DeviceListModule({
     new Map([...syncedDevices, ...createdDevices, ...deviceRows].map((device) => [device.id, device])).values()
   ).map((device) => updatedDevices[device.id] || device);
   const isAndroid = form.type === 'ANDROID_DEVICE';
-  const selectedDeviceId = selectedRows[0] ? String(selectedRows[0]) : '';
   const visibleRows = rows.filter((row) => !row._deleted);
-  const expandedDevice = visibleRows.find((row) => row.id === expandedDeviceId);
-  const columns = compactDeviceColumns(expandedDeviceId, (deviceId) => {
-    setExpandedDeviceId((current) => (current === deviceId ? '' : deviceId));
-  });
 
   const updateForm = (key: keyof typeof form) => (event: ChangeEvent<HTMLInputElement>) => {
     const { value } = event.target;
@@ -2129,129 +3052,6 @@ function DeviceListModule({
     }
   }, [canAdmin, enqueueSnackbar]);
 
-  const scanAndroidSocialLogins = useCallback(async () => {
-    if (!selectedDeviceId) {
-      enqueueSnackbar('Chọn Android device cần quét', { variant: 'warning' });
-      return;
-    }
-
-    setRunningAction('scan-social-logins');
-
-    try {
-      const response = await fetch(`/api/devices/${selectedDeviceId}/scan-social-logins/`, {
-        method: 'POST',
-        headers: authJsonHeaders(),
-      });
-      const body = await response.json();
-
-      if (!response.ok) throw new Error(body.message || 'Không thể quét social login trên Android');
-
-      setAndroidScanResult(body.data);
-      enqueueSnackbar(body.data?.message || 'Đã quét social login trên Android');
-    } catch (error) {
-      enqueueSnackbar(error instanceof Error ? error.message : 'Không thể quét social login trên Android', { variant: 'error' });
-    } finally {
-      setRunningAction('');
-    }
-  }, [enqueueSnackbar, selectedDeviceId]);
-
-  const runDeviceAction = useCallback(
-    async (action: 'health-check' | 'open' | 'close') => {
-      if (!selectedDeviceId) {
-        enqueueSnackbar('Chọn một device cần xử lý', { variant: 'warning' });
-        return;
-      }
-
-      setRunningAction(action);
-
-      try {
-        const response = await fetch(`/api/devices/${selectedDeviceId}/${action}/`, {
-          method: 'POST',
-          headers: authJsonHeaders(),
-        });
-
-        if (!response.ok) {
-          const body = await response.json();
-          throw new Error(body.message || 'Không thể chạy action device');
-        }
-
-        const body = await response.json();
-
-        if (body.data) {
-          setUpdatedDevices((current) => ({ ...current, [selectedDeviceId]: body.data }));
-        }
-
-        enqueueSnackbar(body.result?.message || 'Đã chạy action device');
-      } catch (error) {
-        enqueueSnackbar(error instanceof Error ? error.message : 'Không thể chạy action device', {
-          variant: 'error',
-        });
-      } finally {
-        setRunningAction('');
-      }
-    },
-    [enqueueSnackbar, selectedDeviceId]
-  );
-
-  const runStateAction = useCallback(
-    async (action: 'activate' | 'deactivate' | 'lock' | 'unlock') => {
-      if (!selectedDeviceId) {
-        enqueueSnackbar('Chọn một device cần xử lý', { variant: 'warning' });
-        return;
-      }
-
-      setRunningAction(action);
-
-      try {
-        const response = await fetch(`/api/devices/${selectedDeviceId}/state/`, {
-          method: 'POST',
-          headers: authJsonHeaders(),
-          body: JSON.stringify({ action, reason: action === 'lock' ? 'Khóa từ dashboard' : undefined }),
-        });
-        const body = await response.json();
-
-        if (!response.ok) throw new Error(body.message || 'Không thể cập nhật trạng thái device');
-        if (body.data) setUpdatedDevices((current) => ({ ...current, [selectedDeviceId]: body.data }));
-
-        enqueueSnackbar('Đã cập nhật trạng thái device');
-      } catch (error) {
-        enqueueSnackbar(error instanceof Error ? error.message : 'Không thể cập nhật trạng thái device', {
-          variant: 'error',
-        });
-      } finally {
-        setRunningAction('');
-      }
-    },
-    [enqueueSnackbar, selectedDeviceId]
-  );
-
-  const deleteSelectedDevice = useCallback(async () => {
-    if (!selectedDeviceId) {
-      enqueueSnackbar('Chọn một device cần xóa', { variant: 'warning' });
-      return;
-    }
-
-    setRunningAction('delete');
-
-    try {
-      const response = await fetch(`/api/devices/${selectedDeviceId}/`, {
-        method: 'DELETE',
-        headers: authJsonHeaders(),
-      });
-      const body = await response.json();
-
-      if (!response.ok) throw new Error(body.message || 'Không thể xóa device');
-
-      setUpdatedDevices((current) => ({ ...current, [selectedDeviceId]: { id: selectedDeviceId, _deleted: true } }));
-      setSelectedRows([]);
-      enqueueSnackbar('Đã xóa device');
-    } catch (error) {
-      enqueueSnackbar(error instanceof Error ? error.message : 'Không thể xóa device', { variant: 'error' });
-    } finally {
-      setRunningAction('');
-    }
-  }, [enqueueSnackbar, selectedDeviceId]);
-
   return (
     <Stack spacing={3}>
       {false && <Card>
@@ -2334,80 +3134,53 @@ function DeviceListModule({
         </CardContent>
       </Card>}
 
-      <Stack direction="row" spacing={2}>
-        <Button
-          variant="contained"
-          disabled={!canAdmin || syncingProfiles || provider !== 'MOSTLOGIN'}
-          startIcon={<Iconify icon="solar:refresh-bold" />}
-          onClick={syncMostLoginProfiles}
-        >
-          Sync MostLogin Profiles
-        </Button>
-        <Button
-          variant="contained"
-          disabled={!canAdmin || syncingAndroid || provider !== 'ADB'}
-          startIcon={<Iconify icon="solar:smartphone-update-bold" />}
-          onClick={syncAndroidDevices}
-        >
-          Sync Android ADB
-        </Button>
-        <Button
-          variant="outlined"
-          disabled={!canAdmin || provider !== 'ADB' || !selectedDeviceId || !!runningAction}
-          startIcon={<Iconify icon="solar:user-check-bold" />}
-          onClick={scanAndroidSocialLogins}
-        >
-          Quét social login
-        </Button>
+      <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+        {provider === 'MOSTLOGIN' && (
+          <Button
+            variant="contained"
+            disabled={!canAdmin || syncingProfiles}
+            startIcon={<Iconify icon="solar:refresh-bold" />}
+            onClick={syncMostLoginProfiles}
+          >
+            Sync MostLogin Profiles
+          </Button>
+        )}
+        {provider !== 'MOSTLOGIN' && (
+          <Button
+            variant="contained"
+            disabled={!canAdmin || syncingAndroid}
+            startIcon={<Iconify icon="solar:smartphone-update-bold" />}
+            onClick={syncAndroidDevices}
+          >
+            Nhận diện thiết bị Android (ADB)
+          </Button>
+        )}
         <Button
           variant="outlined"
-          disabled={!canAdmin || !selectedDeviceId || !!runningAction}
-          startIcon={<Iconify icon="solar:pulse-2-bold" />}
-          onClick={() => runDeviceAction('health-check')}
+          disabled={!canAdmin}
+          startIcon={<Iconify icon="solar:add-circle-bold" />}
+          href={paths.dashboard.devicesAdd}
         >
-          Health check
-        </Button>
-        <Button
-          variant="outlined"
-          disabled={!canAdmin || !selectedDeviceId || !!runningAction}
-          startIcon={<Iconify icon="solar:play-circle-bold" />}
-          onClick={() => runDeviceAction('open')}
-        >
-          Open profile/device
-        </Button>
-        <Button
-          variant="outlined"
-          disabled={!canAdmin || !selectedDeviceId || !!runningAction}
-          startIcon={<Iconify icon="solar:stop-circle-bold" />}
-          onClick={() => runDeviceAction('close')}
-        >
-          Close profile/device
-        </Button>
-        <Button variant="outlined" disabled={!canAdmin || !selectedDeviceId || !!runningAction} onClick={() => runStateAction('activate')}>
-          Kích hoạt
-        </Button>
-        <Button variant="outlined" disabled={!canAdmin || !selectedDeviceId || !!runningAction} onClick={() => runStateAction('deactivate')}>
-          Ngưng kích hoạt
-        </Button>
-        <Button variant="outlined" color="warning" disabled={!canAdmin || !selectedDeviceId || !!runningAction} onClick={() => runStateAction('lock')}>
-          Khóa
-        </Button>
-        <Button variant="outlined" disabled={!canAdmin || !selectedDeviceId || !!runningAction} onClick={() => runStateAction('unlock')}>
-          Mở khóa
-        </Button>
-        <Button variant="outlined" color="error" disabled={!canAdmin || !selectedDeviceId || !!runningAction} onClick={deleteSelectedDevice}>
-          Xóa
+          Thêm thiết bị thủ công
         </Button>
       </Stack>
 
-      <DataCard
-        title={title}
-        rows={visibleRows}
-        columns={columns}
-        checkboxSelection
-        rowSelectionModel={selectedRows}
-        onRowSelectionModelChange={setSelectedRows}
-      />
+      {visibleRows.length ? (
+        <Stack spacing={4}>
+          {visibleRows.map((device) => (
+            <DeviceDetailModule key={device.id} canAdmin={canAdmin} deviceId={device.id} />
+          ))}
+        </Stack>
+      ) : (
+        <Card>
+          <CardHeader title={title} />
+          <CardContent>
+            <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
+              Chưa có device nào.
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
       {androidScanResult && (
         <Card>
           <CardHeader title="Kết quả quét social trên Android" subheader={androidScanResult.message} />
@@ -2433,7 +3206,6 @@ function DeviceListModule({
           </CardContent>
         </Card>
       )}
-      {expandedDevice && <DeviceProfileDetails device={expandedDevice} />}
     </Stack>
   );
 }
@@ -2590,10 +3362,10 @@ const healthLogColumns: GridColDef[] = [
   { field: 'checkedAt', headerName: 'Checked at', width: 160 },
 ];
 
-function DeviceDetailModule({ canAdmin }: { canAdmin: boolean }) {
+function DeviceDetailModule({ canAdmin, deviceId: deviceIdProp }: { canAdmin: boolean; deviceId?: string }) {
   const params = useParams();
   const { enqueueSnackbar } = useSnackbar();
-  const deviceId = String(params?.deviceId || '');
+  const deviceId = deviceIdProp || String(params?.deviceId || '');
   const [device, setDevice] = useState<any>(null);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [profilePosts, setProfilePosts] = useState<any[]>([]);
@@ -2603,6 +3375,8 @@ function DeviceDetailModule({ canAdmin }: { canAdmin: boolean }) {
   const [healthRows, setHealthRows] = useState<any[]>([]);
   const [accountPool, setAccountPool] = useState<any[]>([]);
   const [runningAction, setRunningAction] = useState('');
+  const [scrcpyRunning, setScrcpyRunning] = useState(false);
+  const [scrcpyBusy, setScrcpyBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [attachForm, setAttachForm] = useState({ platform: 'FACEBOOK', accountId: '', role: 'BACKUP', isPrimary: false });
   const [verifyForm, setVerifyForm] = useState({
@@ -2648,6 +3422,160 @@ function DeviceDetailModule({ canAdmin }: { canAdmin: boolean }) {
     captionOverride: '',
   });
   const [sourceDownloadResult, setSourceDownloadResult] = useState<any>(null);
+  const [capturingMappingId, setCapturingMappingId] = useState('');
+  const [scanningPagesMappingId, setScanningPagesMappingId] = useState('');
+  const [editAccountForm, setEditAccountForm] = useState<{ open: boolean; accountId: string; mappingId: string; name: string; profileUrl: string }>({
+    open: false,
+    accountId: '',
+    mappingId: '',
+    name: '',
+    profileUrl: '',
+  });
+  const [savingAccountEdit, setSavingAccountEdit] = useState(false);
+  const [instances, setInstances] = useState<Array<{ packageName: string; androidUserId: string; userLabel: string; label: string; key: string; platform?: string; packageType?: string }>>([]);
+  const [bindingMappingId, setBindingMappingId] = useState('');
+  const [createInAppForm, setCreateInAppForm] = useState<{ open: boolean; appKey: string; appLabel: string; type: 'PROFILE' | 'FANPAGE' | 'TIKTOK_PERSONAL' | 'TIKTOK_BUSINESS'; name: string; profileUrl: string; platform: string }>({
+    open: false, appKey: '', appLabel: '', type: 'PROFILE', name: '', profileUrl: '', platform: 'FACEBOOK',
+  });
+  const [creatingInApp, setCreatingInApp] = useState(false);
+
+  useEffect(() => {
+    if (!deviceId) return;
+
+    fetch(`/api/devices/${deviceId}/instances/`, { headers: authJsonHeaders() })
+      .then((response) => response.json())
+      .then((body) => setInstances(Array.isArray(body.data) ? body.data : []))
+      .catch(() => {}); // Device offline → giữ instances đã load trước, không xóa
+  }, [deviceId]);
+
+  const displayInstances = useMemo(() => {
+    if (instances.length) return instances;
+    // Fallback: device offline → suy instance từ account đã gán, vẫn show "Apps trên device".
+    if (!accounts.length) return [];
+    const fromAccounts: Array<{ packageName: string; androidUserId: string; userLabel: string; label: string; key: string; platform?: string; packageType?: string }> = [];
+    const seen = new Set<string>();
+    const userLabels: Record<string, string> = { '0': 'Chính', '10': 'Island', '95': 'Dual App' };
+    const pkgLabels: Record<string, { name: string; platform: string; packageType: string }> = {
+      'com.facebook.katana': { name: 'Facebook', platform: 'FACEBOOK', packageType: 'app' },
+      'com.facebook.lite': { name: 'Facebook Lite', platform: 'FACEBOOK', packageType: 'app' },
+      'com.ss.android.ugc.trill': { name: 'TikTok', platform: 'TIKTOK', packageType: 'app' },
+      'com.zhiliaoapp.musically': { name: 'TikTok', platform: 'TIKTOK', packageType: 'app' },
+      'com.zhiliaoapp.musically.go': { name: 'TikTok Studio', platform: 'TIKTOK', packageType: 'studio' },
+      'com.bytedance.tiktokstudio': { name: 'TikTok Studio', platform: 'TIKTOK', packageType: 'studio' },
+    };
+    for (const acc of accounts as any[]) {
+      if (!acc.instanceKey || seen.has(acc.instanceKey)) continue;
+      seen.add(acc.instanceKey);
+      const uid = acc.instanceAndroidUserId || '0';
+      const pkg = acc.instancePackage || 'com.facebook.katana';
+      const info = pkgLabels[pkg] || { name: pkg, platform: 'FACEBOOK', packageType: 'app' };
+      fromAccounts.push({
+        packageName: pkg,
+        androidUserId: uid,
+        userLabel: userLabels[uid] || `User ${uid}`,
+        label: `${info.name} · ${userLabels[uid] || uid}`,
+        key: acc.instanceKey,
+        platform: info.platform,
+        packageType: info.packageType,
+      });
+    }
+    return fromAccounts;
+  }, [instances, accounts]);
+
+  // Group instances theo platform để render section riêng (FB / TikTok).
+  const instancesByPlatform = useMemo(() => {
+    const groups: Record<string, typeof displayInstances> = {};
+    for (const inst of displayInstances) {
+      const key = inst.platform || 'FACEBOOK';
+      if (!groups[key]) groups[key] = [] as typeof displayInstances;
+      (groups[key] as any).push(inst);
+    }
+    return groups;
+  }, [displayInstances]);
+
+  const bindAccountInstance = useCallback(
+    async (mappingId: string, instanceKey: string) => {
+      if (!canAdmin || !deviceId || !mappingId) return;
+
+      const inst = instances.find((row) => row.key === instanceKey);
+
+      if (!inst) {
+        enqueueSnackbar('Instance không hợp lệ', { variant: 'error' });
+        return;
+      }
+
+      setBindingMappingId(mappingId);
+
+      try {
+        const response = await fetch(`/api/devices/${deviceId}/accounts/${mappingId}/bind-instance/`, {
+          method: 'POST',
+          headers: authJsonHeaders(),
+          body: JSON.stringify({ packageName: inst.packageName, androidUserId: inst.androidUserId }),
+        });
+        const body = await response.json();
+
+        if (!response.ok) throw new Error(body.message || 'Không thể gán instance');
+
+        setAccounts((current) => current.map((row) => (row.mappingId === body.data.mappingId ? body.data : row)));
+        enqueueSnackbar(`Đã gán account vào ${inst.label}`, { variant: 'success' });
+      } catch (error) {
+        enqueueSnackbar(error instanceof Error ? error.message : 'Không thể gán instance', { variant: 'error' });
+      } finally {
+        setBindingMappingId('');
+      }
+    },
+    [canAdmin, deviceId, instances, enqueueSnackbar]
+  );
+
+  const openCreateInApp = useCallback(
+    (
+      app: { key: string; label: string; platform?: string; packageType?: string },
+      type: 'PROFILE' | 'FANPAGE' | 'TIKTOK_PERSONAL' | 'TIKTOK_BUSINESS'
+    ) => {
+      setCreateInAppForm({
+        open: true,
+        appKey: app.key,
+        appLabel: app.label,
+        type,
+        name: '',
+        profileUrl: '',
+        platform: app.platform || 'FACEBOOK',
+      });
+    },
+    []
+  );
+
+  const submitCreateInApp = useCallback(async () => {
+    if (!canAdmin || !deviceId || !createInAppForm.appKey || !createInAppForm.name.trim()) return;
+
+    setCreatingInApp(true);
+
+    try {
+      const response = await fetch(`/api/devices/${deviceId}/apps/${encodeURIComponent(createInAppForm.appKey)}/accounts/`, {
+        method: 'POST',
+        headers: authJsonHeaders(),
+        body: JSON.stringify({
+          name: createInAppForm.name.trim(),
+          type: createInAppForm.type,
+          profileUrl: createInAppForm.profileUrl.trim() || undefined,
+        }),
+      });
+      const body = await response.json();
+
+      if (!response.ok) throw new Error(body.message || 'Không thể tạo account');
+
+      setAccounts((current) => [body.data, ...current.filter((row: any) => row.mappingId !== body.data.mappingId)]);
+      setCreateInAppForm((cur) => ({ ...cur, open: false }));
+      enqueueSnackbar(
+        `Đã tạo "${createInAppForm.name}" trong ${createInAppForm.appLabel}`,
+        { variant: 'success' }
+      );
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Không thể tạo account', { variant: 'error' });
+    } finally {
+      setCreatingInApp(false);
+    }
+  }, [canAdmin, deviceId, createInAppForm, enqueueSnackbar]);
 
   const loadDevice = useCallback(async () => {
     if (!deviceId) return;
@@ -2727,6 +3655,210 @@ function DeviceDetailModule({ canAdmin }: { canAdmin: boolean }) {
     },
     [deviceId, enqueueSnackbar, loadDeviceRelations]
   );
+
+  const callScrcpy = useCallback(
+    async (action: 'start' | 'stop' | 'status') => {
+      const response = await fetch(`/api/devices/${deviceId}/scrcpy/`, {
+        method: 'POST',
+        headers: authJsonHeaders(),
+        body: JSON.stringify({ action }),
+      });
+      const body = await response.json();
+
+      if (!response.ok) throw new Error(body.message || 'Không thể chạy scrcpy action');
+
+      return body.result;
+    },
+    [deviceId]
+  );
+
+  const loadScrcpyStatus = useCallback(async () => {
+    if (!deviceId) return;
+
+    try {
+      const result = await callScrcpy('status');
+      setScrcpyRunning(Boolean(result?.session));
+    } catch {
+      setScrcpyRunning(false);
+    }
+  }, [callScrcpy, deviceId]);
+
+  useEffect(() => {
+    loadScrcpyStatus();
+  }, [loadScrcpyStatus]);
+
+  const runScrcpyAction = useCallback(
+    async (action: 'start' | 'stop') => {
+      if (!deviceId) return;
+
+      setScrcpyBusy(true);
+
+      try {
+        const result = await callScrcpy(action);
+
+        setScrcpyRunning(action === 'start' ? Boolean(result?.session) : false);
+        enqueueSnackbar(result?.message || (action === 'start' ? 'Đã mở màn hình device' : 'Đã đóng màn hình device'));
+      } catch (error) {
+        enqueueSnackbar(error instanceof Error ? error.message : 'Không thể chạy scrcpy action', { variant: 'error' });
+        loadScrcpyStatus().catch(() => undefined);
+      } finally {
+        setScrcpyBusy(false);
+      }
+    },
+    [callScrcpy, deviceId, enqueueSnackbar, loadScrcpyStatus]
+  );
+
+  const captureAccountThumbnail = useCallback(
+    async (account: any) => {
+      if (!canAdmin || !deviceId || !account?.mappingId) return;
+
+      setCapturingMappingId(account.mappingId);
+
+      try {
+        const response = await fetch(`/api/devices/${deviceId}/accounts/${account.mappingId}/capture-thumbnail/`, {
+          method: 'POST',
+          headers: authJsonHeaders(),
+        });
+        const body = await response.json();
+
+        if (!response.ok) throw new Error(body.message || 'Không thể chụp thumbnail');
+
+        setAccounts((current) => current.map((row) => (row.mappingId === body.data.mappingId ? body.data : row)));
+        enqueueSnackbar('Đã lưu ảnh màn hình hiện tại làm thumbnail');
+      } catch (error) {
+        enqueueSnackbar(error instanceof Error ? error.message : 'Không thể chụp thumbnail', { variant: 'error' });
+      } finally {
+        setCapturingMappingId('');
+      }
+    },
+    [canAdmin, deviceId, enqueueSnackbar]
+  );
+
+  const uploadAccountThumbnail = useCallback(
+    async (account: any, file: File) => {
+      if (!canAdmin || !deviceId || !account?.mappingId || !file) return;
+
+      setCapturingMappingId(account.mappingId);
+
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(new Error('Không đọc được file ảnh'));
+          reader.readAsDataURL(file);
+        });
+
+        const response = await fetch(`/api/devices/${deviceId}/accounts/${account.mappingId}/upload-thumbnail/`, {
+          method: 'POST',
+          headers: authJsonHeaders(),
+          body: JSON.stringify({ dataUrl }),
+        });
+        const body = await response.json();
+
+        if (!response.ok) throw new Error(body.message || 'Không thể tải ảnh thumbnail');
+
+        setAccounts((current) => current.map((row) => (row.mappingId === body.data.mappingId ? body.data : row)));
+        enqueueSnackbar('Đã cập nhật thumbnail từ ảnh tải lên');
+      } catch (error) {
+        enqueueSnackbar(error instanceof Error ? error.message : 'Không thể tải ảnh thumbnail', { variant: 'error' });
+      } finally {
+        setCapturingMappingId('');
+      }
+    },
+    [canAdmin, deviceId, enqueueSnackbar]
+  );
+
+  // Mở hộp chọn file rồi upload làm thumbnail (giải pháp cho app chặn screencap như TikTok).
+  const pickAndUploadThumbnail = useCallback(
+    (account: any) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/png,image/jpeg,image/webp';
+      input.onchange = () => {
+        const file = input.files?.[0];
+        if (file) uploadAccountThumbnail(account, file);
+      };
+      input.click();
+    },
+    [uploadAccountThumbnail]
+  );
+
+  const scanFanpages = useCallback(
+    async (account: any) => {
+      if (!canAdmin || !deviceId || !account?.mappingId) return;
+
+      setScanningPagesMappingId(account.mappingId);
+
+      try {
+        const response = await fetch(`/api/devices/${deviceId}/accounts/${account.mappingId}/scan-pages/`, {
+          method: 'POST',
+          headers: authJsonHeaders(),
+        });
+        const body = await response.json();
+
+        if (!response.ok) throw new Error(body.message || 'Không thể quét Fanpage');
+
+        const count = body.data?.pages?.length || 0;
+        const activeProfile = body.data?.activeProfile ? ` · profile đang active: ${body.data.activeProfile}` : '';
+
+        if (body.data?.status === 'OK') {
+          enqueueSnackbar(
+            count ? `Đã quét được ${count} Fanpage${activeProfile}` : `Không thấy Fanpage nào cho profile này${activeProfile}`
+          );
+        } else {
+          enqueueSnackbar(body.data?.message || 'MobileRun chưa quét được Fanpage', { variant: 'warning' });
+        }
+
+        await loadDeviceRelations().catch(() => undefined);
+      } catch (error) {
+        enqueueSnackbar(error instanceof Error ? error.message : 'Không thể quét Fanpage', { variant: 'error' });
+      } finally {
+        setScanningPagesMappingId('');
+      }
+    },
+    [canAdmin, deviceId, enqueueSnackbar, loadDeviceRelations]
+  );
+
+  const openEditAccount = useCallback((account: any) => {
+    setEditAccountForm({
+      open: true,
+      accountId: account.accountId,
+      mappingId: account.mappingId,
+      name: account.accountName || account.detectedAccountName || '',
+      profileUrl: account.profileUrl || '',
+    });
+  }, []);
+
+  const saveEditAccount = useCallback(async () => {
+    if (!canAdmin || !editAccountForm.accountId) return;
+
+    setSavingAccountEdit(true);
+
+    try {
+      const response = await fetch(`/api/accounts/${editAccountForm.accountId}/`, {
+        method: 'PATCH',
+        headers: authJsonHeaders(),
+        body: JSON.stringify({ name: editAccountForm.name, profileUrl: editAccountForm.profileUrl || null }),
+      });
+      const body = await response.json();
+
+      if (!response.ok) throw new Error(body.message || 'Không thể cập nhật tài khoản');
+
+      setAccounts((current) =>
+        current.map((row) =>
+          row.accountId === editAccountForm.accountId
+            ? { ...row, accountName: body.data?.name ?? editAccountForm.name, profileUrl: body.data?.profileUrl ?? editAccountForm.profileUrl }
+            : row
+        )
+      );
+      setEditAccountForm((current) => ({ ...current, open: false }));
+      enqueueSnackbar('Đã cập nhật thông tin tài khoản');
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Không thể cập nhật tài khoản', { variant: 'error' });
+    } finally {
+      setSavingAccountEdit(false);
+    }
+  }, [canAdmin, editAccountForm, enqueueSnackbar]);
 
   const verifiedAccounts = useMemo(
     () => accounts.filter((account) => account.verificationStatus === 'VERIFIED'),
@@ -3392,115 +4524,165 @@ function DeviceDetailModule({ canAdmin }: { canAdmin: boolean }) {
     const androidMetadata = device.metadata?.lastAndroidSocialScan || {};
     const pageAccounts = accounts.filter((account) => account.type === 'FANPAGE');
     const profileAccounts = accounts.filter((account) => account.type !== 'FANPAGE');
-    const renderAccountGroup = (title: string, groupAccounts: any[], emptyText: string) => (
-      <Stack spacing={1}>
-        <Stack direction="row" spacing={1} alignItems="center">
-          <Typography variant="subtitle1">{title}</Typography>
-          <Chip size="small" label={groupAccounts.length} />
-        </Stack>
-        <Grid container spacing={1.25}>
+    const renderAccountGroup = (title: string, groupAccounts: any[], emptyText: string) => {
+      if (!groupAccounts.length) {
+        return (
+          <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: 'background.neutral', textAlign: 'center' }}>
+            <Typography variant="body2" color="text.secondary">
+              {emptyText}
+            </Typography>
+          </Box>
+        );
+      }
+
+      return (
+        <Box
+          sx={{
+            columnGap: 1.25,
+            columns: { xs: '2 auto', sm: '3 auto', md: '4 auto', lg: '5 auto' },
+            '& > *': { breakInside: 'avoid', mb: 1.25 },
+          }}
+        >
           {groupAccounts.map((account) => (
-            <Grid key={account.mappingId} item xs={12} sm={6} md={4} lg={3}>
-              <Card
-                component={NextLink}
-                href={`${paths.dashboard.accounts}/${account.accountId}`}
-                variant="outlined"
+            <Card
+              key={account.mappingId}
+              component={NextLink}
+              href={`${paths.dashboard.accounts}/${account.accountId}`}
+              variant="outlined"
+              sx={{
+                display: 'block',
+                color: 'inherit',
+                textDecoration: 'none',
+                overflow: 'hidden',
+                transition: (theme) => theme.transitions.create('box-shadow', { duration: theme.transitions.duration.shorter }),
+                '&:hover': { boxShadow: 4 },
+              }}
+            >
+              <Box
                 sx={{
-                  height: '100%',
-                  maxWidth: 320,
-                  display: 'block',
-                  color: 'inherit',
-                  textDecoration: 'none',
-                  transition: (theme) => theme.transitions.create(['box-shadow', 'transform'], { duration: theme.transitions.duration.shorter }),
-                  '&:hover': {
-                    boxShadow: 6,
-                    transform: 'translateY(-2px)',
-                  },
+                  position: 'relative',
+                  width: 1,
+                  minHeight: 64,
+                  bgcolor: 'grey.900',
+                  borderBottom: (theme) => `1px solid ${theme.palette.divider}`,
                 }}
               >
+                {account.avatarUrl ? (
+                  <Box
+                    component="img"
+                    src={account.avatarUrl}
+                    alt={account.accountName}
+                    loading="lazy"
+                    decoding="async"
+                    sx={{ width: 1, height: 'auto', objectFit: 'cover', objectPosition: 'top center', display: 'block' }}
+                  />
+                ) : (
+                  <Box sx={{ display: 'grid', placeItems: 'center', minHeight: 96, color: 'common.white' }}>
+                    <Iconify icon={socialPlatformIcon(account.platformCode)} width={26} />
+                  </Box>
+                )}
                 <Box
                   sx={{
-                    aspectRatio: '16 / 9',
-                    bgcolor: 'grey.950',
-                    borderBottom: (theme) => `1px solid ${theme.palette.divider}`,
-                    position: 'relative',
-                    overflow: 'hidden',
+                    position: 'absolute',
+                    top: 5,
+                    left: 5,
+                    width: 20,
+                    height: 20,
+                    borderRadius: 0.5,
+                    display: 'grid',
+                    placeItems: 'center',
+                    bgcolor: 'background.paper',
+                    boxShadow: 1,
                   }}
                 >
-                  {account.avatarUrl ? (
-                    <Box
-                      component="img"
-                      src={account.avatarUrl}
-                      alt={account.accountName}
-                      loading="lazy"
-                      decoding="async"
-                      sx={{
-                        width: 1,
-                        height: 1,
-                        objectFit: 'cover',
-                        objectPosition: 'top center',
-                        display: 'block',
-                      }}
-                    />
-                  ) : (
-                    <Stack alignItems="center" justifyContent="center" spacing={0.75} sx={{ height: 1, px: 1, textAlign: 'center', color: 'common.white' }}>
-                      <Iconify icon={socialPlatformIcon(account.platformCode)} width={28} />
-                      <Typography variant="caption" noWrap sx={{ maxWidth: 1, fontWeight: 700 }}>
-                        {account.detectedAccountName || account.accountName}
-                      </Typography>
-                      <Typography variant="caption" sx={{ color: 'grey.500', fontSize: 10, lineHeight: 1.25 }}>
-                        {account.lastVerificationError || 'Chưa có ảnh'}
-                      </Typography>
-                    </Stack>
-                  )}
-                  <Tooltip title={account.platform} arrow>
-                    <Box
-                      sx={{
-                        position: 'absolute',
-                        top: 6,
-                        left: 6,
-                        width: 26,
-                        height: 26,
-                        borderRadius: 0.75,
-                        display: 'grid',
-                        placeItems: 'center',
-                        bgcolor: 'background.paper',
-                        boxShadow: 1,
-                      }}
-                    >
-                      <Iconify icon={socialPlatformIcon(account.platformCode)} width={17} />
-                    </Box>
-                  </Tooltip>
+                  <Iconify icon={socialPlatformIcon(account.platformCode)} width={13} />
                 </Box>
-                <CardContent sx={{ p: 1.1 }}>
-                  <Stack spacing={0.8}>
-                    <Typography variant="subtitle2" noWrap sx={{ fontWeight: 700, lineHeight: 1.2 }}>
-                      {account.detectedAccountName || account.accountName}
-                    </Typography>
-                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                      <Chip size="small" color={account.verificationStatus === 'VERIFIED' ? 'success' : 'default'} label={account.verificationStatus || 'UNVERIFIED'} sx={{ height: 23, fontSize: 11 }} />
-                      <Chip size="small" label={`${account.postsCount || 0} bài`} sx={{ height: 23, fontSize: 11 }} />
-                    </Stack>
-                    <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: 11 }}>
-                      {account.profileUrl || account.detectedAccountId || account.accountId}
-                    </Typography>
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
-          {!groupAccounts.length && (
-            <Grid item xs={12}>
-              <Box sx={{ p: 2, borderRadius: 1, bgcolor: 'background.neutral', textAlign: 'center' }}>
-                <Typography variant="body2" color="text.secondary">
-                  {emptyText}
-                </Typography>
+                <Stack
+                  direction="row"
+                  spacing={0}
+                  sx={{ position: 'absolute', top: 4, right: 4 }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                >
+                  <Tooltip title={deviceOffline ? 'Device offline, chưa thể chụp' : 'Chụp thumbnail (app như TikTok có thể chặn)'} arrow>
+                    <span>
+                      <IconButton
+                        size="small"
+                        disabled={!canAdmin || deviceOffline || capturingMappingId === account.mappingId}
+                        onClick={() => captureAccountThumbnail(account)}
+                        sx={{ p: 0.4, bgcolor: 'background.paper', boxShadow: 1, '&:hover': { bgcolor: 'background.paper' } }}
+                      >
+                        <Iconify icon="solar:camera-bold" width={14} />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title="Tải ảnh làm thumbnail (cho app chặn chụp như TikTok)" arrow>
+                    <span>
+                      <IconButton
+                        size="small"
+                        disabled={!canAdmin || capturingMappingId === account.mappingId}
+                        onClick={() => pickAndUploadThumbnail(account)}
+                        sx={{ p: 0.4, ml: 0.4, bgcolor: 'background.paper', boxShadow: 1, '&:hover': { bgcolor: 'background.paper' } }}
+                      >
+                        <Iconify icon="solar:gallery-add-bold" width={14} />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title="Sửa" arrow>
+                    <span>
+                      <IconButton
+                        size="small"
+                        disabled={!canAdmin}
+                        onClick={() => openEditAccount(account)}
+                        sx={{ p: 0.4, ml: 0.4, bgcolor: 'background.paper', boxShadow: 1, '&:hover': { bgcolor: 'background.paper' } }}
+                      >
+                        <Iconify icon="solar:pen-bold" width={14} />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  {account.platformCode === 'FACEBOOK' && account.type !== 'FANPAGE' && (
+                    <Tooltip title={deviceOffline ? 'Device offline, chưa thể quét Page' : 'Quét Fanpage'} arrow>
+                      <span>
+                        <IconButton
+                          size="small"
+                          disabled={!canAdmin || deviceOffline || scanningPagesMappingId === account.mappingId}
+                          onClick={() => scanFanpages(account)}
+                          sx={{ p: 0.4, ml: 0.4, bgcolor: 'background.paper', boxShadow: 1, '&:hover': { bgcolor: 'background.paper' } }}
+                        >
+                          <Iconify icon="solar:flag-bold" width={14} />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  )}
+                </Stack>
               </Box>
-            </Grid>
-          )}
-        </Grid>
-      </Stack>
-    );
+
+              <Box sx={{ p: 1, minWidth: 0 }}>
+                <Typography variant="subtitle2" noWrap sx={{ fontWeight: 700, lineHeight: 1.2 }}>
+                  {account.accountName || account.detectedAccountName}
+                </Typography>
+                <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.25 }}>
+                  <Box
+                    sx={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: '50%',
+                      flexShrink: 0,
+                      bgcolor: account.verificationStatus === 'VERIFIED' ? 'success.main' : 'text.disabled',
+                    }}
+                  />
+                  <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: 11 }}>
+                    {account.verificationStatus === 'VERIFIED' ? 'Verified' : 'Chưa xác minh'} · {account.postsCount || 0} bài
+                  </Typography>
+                </Stack>
+              </Box>
+            </Card>
+          ))}
+        </Box>
+      );
+    };
     const compactAccountColumns: GridColDef[] = [
       { field: 'accountName', headerName: 'Social account', flex: 1, minWidth: 180 },
       { field: 'platform', headerName: 'Nền tảng', width: 130 },
@@ -3545,6 +4727,11 @@ function DeviceDetailModule({ canAdmin }: { canAdmin: boolean }) {
                 <Tooltip title="Health check" arrow><span><IconButton disabled={!canAdmin || !!runningAction} sx={iconButtonSx} onClick={() => runDeviceAction('health-check')}><Iconify icon="solar:heart-pulse-bold" width={22} /></IconButton></span></Tooltip>
                 <Tooltip title={deviceOffline ? 'Device offline, chưa thể wake qua ADB' : 'Wake device'} arrow><span><IconButton disabled={liveActionDisabled} sx={iconButtonSx} onClick={() => runDeviceAction('open')}><Iconify icon="solar:play-bold" width={22} /></IconButton></span></Tooltip>
                 <Tooltip title={deviceOffline ? 'Device offline, chưa thể sleep qua ADB' : 'Sleep device'} arrow><span><IconButton disabled={liveActionDisabled} sx={iconButtonSx} onClick={() => runDeviceAction('close')}><Iconify icon="solar:stop-bold" width={22} /></IconButton></span></Tooltip>
+                {scrcpyRunning ? (
+                  <Tooltip title="Đóng màn hình (scrcpy)" arrow><span><IconButton color="warning" disabled={scrcpyBusy} sx={iconButtonSx} onClick={() => runScrcpyAction('stop')}><Iconify icon="solar:smartphone-2-bold" width={22} /></IconButton></span></Tooltip>
+                ) : (
+                  <Tooltip title={deviceOffline ? 'Device offline, chưa thể mở màn hình' : 'Mở màn hình điều khiển (scrcpy)'} arrow><span><IconButton disabled={liveActionDisabled || scrcpyBusy} sx={iconButtonSx} onClick={() => runScrcpyAction('start')}><Iconify icon="solar:smartphone-bold" width={22} /></IconButton></span></Tooltip>
+                )}
                 <Tooltip title={deviceOffline ? 'Device offline, chưa thể quét social login' : 'Quét social login'} arrow><span><IconButton disabled={liveActionDisabled} sx={iconButtonSx} onClick={scanAndroidLoginsFromDetail}><Iconify icon="solar:user-check-bold" width={22} /></IconButton></span></Tooltip>
                 <Tooltip title="Kích hoạt" arrow><span><IconButton disabled={!canAdmin || !!runningAction || deviceLocked} sx={iconButtonSx} onClick={() => runStateAction('activate')}><Iconify icon="solar:check-circle-bold" width={22} /></IconButton></span></Tooltip>
                 <Tooltip title="Ngưng kích hoạt" arrow><span><IconButton disabled={!canAdmin || !!runningAction} sx={iconButtonSx} onClick={() => runStateAction('deactivate')}><Iconify icon="solar:pause-circle-bold" width={22} /></IconButton></span></Tooltip>
@@ -3560,35 +4747,212 @@ function DeviceDetailModule({ canAdmin }: { canAdmin: boolean }) {
           <Grid item xs={12}>
             <Card>
               <CardHeader
-                title="Social account đã phát hiện"
-                subheader={`${accounts.length} account · ${(androidMetadata.installedApps || []).length} app social`}
-                action={<Button size="small" variant="outlined" onClick={scanAndroidLoginsFromDetail} disabled={!canAdmin || !!runningAction}>Quét lại</Button>}
+                title="Apps trên device"
+                subheader={`${displayInstances.length} app · ${accounts.length} account đã gán`}
               />
               <CardContent>
-                <Stack spacing={2}>
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    {(androidMetadata.installedApps || []).map((app: any) => (
-                      <Chip key={app.packageName} icon={<Iconify icon={socialPlatformIcon(app.platform)} width={16} /> as any} label={app.label} />
-                    ))}
-                    {!(androidMetadata.installedApps || []).length && <Chip label="Chưa có dữ liệu app social" />}
+                {!displayInstances.length ? (
+                  <Box sx={{ p: 3, borderRadius: 1, bgcolor: 'background.neutral', textAlign: 'center' }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Chưa quét được app Facebook/TikTok trên device. {deviceOffline ? 'Device đang offline — vẫn có thể quản lý account đã gán.' : 'Kiểm tra device online + ADB hoạt động.'}
+                    </Typography>
+                  </Box>
+                ) : (
+                  <Stack spacing={3}>
+                    {(['FACEBOOK', 'TIKTOK'] as const).map((platformKey) => {
+                      const platformApps = (instancesByPlatform as any)[platformKey] || [];
+                      if (!platformApps.length) return null;
+                      const platformLabel = platformKey === 'FACEBOOK' ? 'Facebook' : 'TikTok';
+                      const platformIcon = platformKey === 'FACEBOOK' ? 'logos:facebook' : 'logos:tiktok-icon';
+                      return (
+                        <Box key={platformKey}>
+                          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                            <Iconify icon={platformIcon} width={20} />
+                            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                              {platformLabel} ({platformApps.length} app)
+                            </Typography>
+                          </Stack>
+                          <Stack spacing={2}>
+                            {platformApps.map((app: any) => {
+                              const inApp = accounts.filter((acc: any) => acc.instanceKey === app.key);
+                              // FB: profile = type !== 'FANPAGE'. TikTok: TIKTOK_PERSONAL hoặc TIKTOK_BUSINESS đều là "primary" của app đó.
+                              const profile = inApp.find((acc: any) =>
+                                platformKey === 'FACEBOOK' ? acc.type !== 'FANPAGE' : true
+                              );
+                              const pages = platformKey === 'FACEBOOK'
+                                ? inApp.filter((acc: any) => acc.type === 'FANPAGE')
+                                : [];
+                              const isTiktokStudio = app.packageType === 'studio';
+                              const isTiktokApp = platformKey === 'TIKTOK' && !isTiktokStudio;
+                              const primaryType: 'PROFILE' | 'TIKTOK_PERSONAL' | 'TIKTOK_BUSINESS' =
+                                isTiktokStudio ? 'TIKTOK_BUSINESS' : isTiktokApp ? 'TIKTOK_PERSONAL' : 'PROFILE';
+                              const primaryLabel =
+                                isTiktokStudio ? 'Thêm Business' : isTiktokApp ? 'Thêm TikTok' : 'Thêm Profile';
+                              const primaryLabelExisting =
+                                isTiktokStudio ? 'Đã có Business' : isTiktokApp ? 'Đã có TikTok' : 'Đã có Profile';
+
+                              return (
+                                <Card key={app.key} variant="outlined">
+                                  <CardHeader
+                                    title={app.label}
+                                    subheader={`${app.packageName} · user ${app.androidUserId}`}
+                                    titleTypographyProps={{ variant: 'subtitle2', fontWeight: 700 }}
+                                    subheaderTypographyProps={{ variant: 'caption' }}
+                                    sx={{ p: 1.5, pb: 1 }}
+                                    action={
+                                      <Stack direction="row" spacing={1}>
+                                        <Button
+                                          size="small"
+                                          variant={profile ? 'outlined' : 'contained'}
+                                          disabled={!canAdmin || Boolean(profile)}
+                                          onClick={() => openCreateInApp(app, primaryType)}
+                                          startIcon={<Iconify icon="solar:user-plus-bold" width={16} />}
+                                        >
+                                          {profile ? primaryLabelExisting : primaryLabel}
+                                        </Button>
+                                        {platformKey === 'FACEBOOK' && (
+                                          <Button
+                                            size="small"
+                                            variant="outlined"
+                                            disabled={!canAdmin || !profile}
+                                            onClick={() => openCreateInApp(app, 'FANPAGE')}
+                                            startIcon={<Iconify icon="solar:flag-bold" width={16} />}
+                                          >
+                                            Thêm page
+                                          </Button>
+                                        )}
+                                      </Stack>
+                                    }
+                                  />
+                                  <CardContent sx={{ p: 1.5, pt: 0, '&:last-child': { pb: 1.5 } }}>
+                                    {!inApp.length ? (
+                                      <Typography variant="body2" color="text.secondary" sx={{ py: 1 }}>
+                                        Chưa có account nào trong app này. Bấm "{primaryLabel}" để gán.
+                                      </Typography>
+                                    ) : (
+                                      <Stack spacing={1.25}>
+                                        {profile && (
+                                          <Box>
+                                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                              {platformKey === 'TIKTOK' ? (isTiktokStudio ? 'Business account' : 'TikTok account') : 'Active profile'}
+                                            </Typography>
+                                            {renderAccountGroup('', [profile], '')}
+                                          </Box>
+                                        )}
+                                        {pages.length > 0 && (
+                                          <Box>
+                                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                              Pages quản lý ({pages.length})
+                                            </Typography>
+                                            {renderAccountGroup('', pages, '')}
+                                          </Box>
+                                        )}
+                                      </Stack>
+                                    )}
+                                  </CardContent>
+                                </Card>
+                              );
+                            })}
+                          </Stack>
+                        </Box>
+                      );
+                    })}
                   </Stack>
-                  {accounts.length ? (
-                    <Stack spacing={1.75}>
-                      {renderAccountGroup('Page', pageAccounts, 'Chưa phát hiện Page trên Android device này.')}
-                      {renderAccountGroup('Profile cá nhân', profileAccounts, 'Chưa phát hiện profile cá nhân trên Android device này.')}
-                    </Stack>
-                  ) : (
-                    <Box sx={{ p: 3, borderRadius: 1, bgcolor: 'background.neutral', textAlign: 'center' }}>
-                      <Typography variant="body2" color="text.secondary">
-                        Chưa phát hiện Social Account trên Android device này.
-                      </Typography>
-                    </Box>
-                  )}
-                </Stack>
+                )}
               </CardContent>
             </Card>
           </Grid>
         </Grid>
+
+        <Dialog open={createInAppForm.open} onClose={() => setCreateInAppForm((cur) => ({ ...cur, open: false }))} fullWidth maxWidth="xs">
+          <DialogTitle>
+            {(() => {
+              const t = createInAppForm.type;
+              const kind =
+                t === 'FANPAGE' ? 'Fanpage' :
+                t === 'TIKTOK_PERSONAL' ? 'tài khoản TikTok' :
+                t === 'TIKTOK_BUSINESS' ? 'tài khoản Business' : 'profile';
+              return <>Thêm {kind} vào {createInAppForm.appLabel}</>;
+            })()}
+          </DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <TextField
+                label={
+                  createInAppForm.type === 'FANPAGE'
+                    ? 'Tên page'
+                    : createInAppForm.type === 'TIKTOK_PERSONAL'
+                      ? 'Tên TikTok (handle hoặc tên hiển thị)'
+                      : createInAppForm.type === 'TIKTOK_BUSINESS'
+                        ? 'Tên Business account (TikTok Studio)'
+                        : 'Tên profile'
+                }
+                fullWidth
+                value={createInAppForm.name}
+                onChange={(event) => setCreateInAppForm((cur) => ({ ...cur, name: event.target.value }))}
+                autoFocus
+                helperText={
+                  createInAppForm.type === 'PROFILE'
+                    ? 'Tên profile cá nhân đang active trong app này'
+                    : createInAppForm.type === 'FANPAGE'
+                      ? 'Tên page do profile cá nhân quản lý'
+                      : createInAppForm.type === 'TIKTOK_PERSONAL'
+                        ? 'Account TikTok đang active trong app TikTok (@username hoặc display name)'
+                        : 'Business account đang active trong TikTok Studio'
+                }
+              />
+              <TextField
+                label="Profile URL (tùy chọn)"
+                fullWidth
+                value={createInAppForm.profileUrl}
+                onChange={(event) => setCreateInAppForm((cur) => ({ ...cur, profileUrl: event.target.value }))}
+                placeholder={
+                  createInAppForm.platform === 'TIKTOK'
+                    ? 'https://www.tiktok.com/@username'
+                    : 'https://www.facebook.com/...'
+                }
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button color="inherit" onClick={() => setCreateInAppForm((cur) => ({ ...cur, open: false }))}>
+              Hủy
+            </Button>
+            <Button variant="contained" onClick={submitCreateInApp} disabled={creatingInApp || !createInAppForm.name.trim()}>
+              {creatingInApp ? 'Đang tạo' : 'Tạo'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog open={editAccountForm.open} onClose={() => setEditAccountForm((current) => ({ ...current, open: false }))} fullWidth maxWidth="xs">
+          <DialogTitle>Sửa thông tin tài khoản</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <TextField
+                label="Tên hiển thị"
+                fullWidth
+                value={editAccountForm.name}
+                onChange={(event) => setEditAccountForm((current) => ({ ...current, name: event.target.value }))}
+                autoFocus
+              />
+              <TextField
+                label="Profile URL"
+                fullWidth
+                value={editAccountForm.profileUrl}
+                onChange={(event) => setEditAccountForm((current) => ({ ...current, profileUrl: event.target.value }))}
+                placeholder="https://www.facebook.com/<uid>"
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button color="inherit" onClick={() => setEditAccountForm((current) => ({ ...current, open: false }))}>
+              Hủy
+            </Button>
+            <Button variant="contained" onClick={saveEditAccount} disabled={savingAccountEdit || !editAccountForm.name.trim()}>
+              Lưu
+            </Button>
+          </DialogActions>
+        </Dialog>
 
       </Stack>
     );
@@ -4732,6 +6096,10 @@ function SettingsModule({ canAdmin }: { canAdmin: boolean }) {
   const [saving, setSaving] = useState(false);
   const [testingMostLogin, setTestingMostLogin] = useState(false);
   const [testingMostLoginList, setTestingMostLoginList] = useState(false);
+  const [testingR2, setTestingR2] = useState(false);
+  const [testingDrive, setTestingDrive] = useState(false);
+  const [testingTelegram, setTestingTelegram] = useState(false);
+  const [storageStats, setStorageStats] = useState({ backedUp: 0, failed: 0, pending: 0, skipped: 0 });
   const [settings, setSettings] = useState({
     timezone: 'Asia/Ho_Chi_Minh',
     approvalRequiredByDefault: true,
@@ -4747,6 +6115,36 @@ function SettingsModule({ canAdmin }: { canAdmin: boolean }) {
     mostLoginDetailProfilePath: '/api/profile/detail',
     mostLoginOpenProfilePath: '/api/browser/openBrowser',
     mostLoginCloseProfilePath: '/api/browser/closeProfiles',
+    storageProvider: 'none',
+    r2AccountId: '',
+    r2Endpoint: '',
+    r2BucketName: '',
+    r2AccessKeyId: '',
+    r2SecretAccessKey: '',
+    r2SecretConfigured: false,
+    r2PublicBaseUrl: '',
+    r2ObjectKeyPrefix: 'gami/',
+    r2PresignExpiresSeconds: '3600',
+    driveClientId: '',
+    driveClientSecret: '',
+    driveSecretConfigured: false,
+    driveConnected: false,
+    driveConnectedEmail: '',
+    driveFolderId: '',
+    driveFolderName: 'GamiMedia',
+    telegramEnabled: false,
+    telegramBotToken: '',
+    telegramTokenConfigured: false,
+    telegramApiBaseUrl: 'https://api.telegram.org',
+    telegramAppBaseUrl: 'http://localhost:8081',
+    telegramDefaultAccountId: '',
+    telegramAllowedChatIds: '',
+    telegramTzOffset: '+07:00',
+    translateEnabled: false,
+    translateBaseUrl: 'https://api.openai.com/v1',
+    translateApiKey: '',
+    translateApiKeyConfigured: false,
+    translateModel: 'gpt-4o-mini',
   });
 
   useEffect(() => {
@@ -4773,13 +6171,46 @@ function SettingsModule({ canAdmin }: { canAdmin: boolean }) {
           mostLoginDetailProfilePath: data.mostLoginDetailProfilePath || current.mostLoginDetailProfilePath,
           mostLoginOpenProfilePath: data.mostLoginOpenProfilePath || current.mostLoginOpenProfilePath,
           mostLoginCloseProfilePath: data.mostLoginCloseProfilePath || current.mostLoginCloseProfilePath,
+          storageProvider: data.storageProvider || current.storageProvider,
+          r2AccountId: data.r2AccountId ?? current.r2AccountId,
+          r2Endpoint: data.r2Endpoint ?? current.r2Endpoint,
+          r2BucketName: data.r2BucketName ?? current.r2BucketName,
+          r2AccessKeyId: data.r2AccessKeyId ?? current.r2AccessKeyId,
+          r2SecretConfigured: data.r2SecretConfigured ?? current.r2SecretConfigured,
+          r2PublicBaseUrl: data.r2PublicBaseUrl ?? current.r2PublicBaseUrl,
+          r2ObjectKeyPrefix: data.r2ObjectKeyPrefix || current.r2ObjectKeyPrefix,
+          r2PresignExpiresSeconds: data.r2PresignExpiresSeconds
+            ? String(data.r2PresignExpiresSeconds)
+            : current.r2PresignExpiresSeconds,
+          driveClientId: data.driveClientId ?? current.driveClientId,
+          driveSecretConfigured: data.driveSecretConfigured ?? current.driveSecretConfigured,
+          driveConnected: data.driveConnected ?? current.driveConnected,
+          driveConnectedEmail: data.driveConnectedEmail ?? current.driveConnectedEmail,
+          driveFolderId: data.driveFolderId ?? current.driveFolderId,
+          driveFolderName: data.driveFolderName || current.driveFolderName,
+          telegramEnabled: data.telegramEnabled ?? current.telegramEnabled,
+          telegramTokenConfigured: data.telegramTokenConfigured ?? current.telegramTokenConfigured,
+          telegramApiBaseUrl: data.telegramApiBaseUrl || current.telegramApiBaseUrl,
+          telegramAppBaseUrl: data.telegramAppBaseUrl || current.telegramAppBaseUrl,
+          telegramDefaultAccountId: data.telegramDefaultAccountId ?? current.telegramDefaultAccountId,
+          telegramAllowedChatIds: data.telegramAllowedChatIds ?? current.telegramAllowedChatIds,
+          telegramTzOffset: data.telegramTzOffset || current.telegramTzOffset,
+          translateEnabled: data.translateEnabled ?? current.translateEnabled,
+          translateBaseUrl: data.translateBaseUrl || current.translateBaseUrl,
+          translateApiKeyConfigured: data.translateApiKeyConfigured ?? current.translateApiKeyConfigured,
+          translateModel: data.translateModel || current.translateModel,
         }));
+
+        if (data.storageStats) setStorageStats(data.storageStats);
       })
       .catch(() => undefined);
   }, []);
 
   const updateSettings = (key: keyof typeof settings) => (event: ChangeEvent<HTMLInputElement>) => {
-    const value = key === 'approvalRequiredByDefault' ? event.target.checked : event.target.value;
+    const value =
+      key === 'approvalRequiredByDefault' || key === 'telegramEnabled' || key === 'translateEnabled'
+        ? event.target.checked
+        : event.target.value;
     setSettings((current) => ({ ...current, [key]: value }));
   };
 
@@ -4809,6 +6240,30 @@ function SettingsModule({ canAdmin }: { canAdmin: boolean }) {
           mostLoginDetailProfilePath: settings.mostLoginDetailProfilePath,
           mostLoginOpenProfilePath: settings.mostLoginOpenProfilePath,
           mostLoginCloseProfilePath: settings.mostLoginCloseProfilePath,
+          storageProvider: settings.storageProvider,
+          r2AccountId: settings.r2AccountId,
+          r2Endpoint: settings.r2Endpoint,
+          r2BucketName: settings.r2BucketName,
+          r2AccessKeyId: settings.r2AccessKeyId,
+          r2SecretAccessKey: settings.r2SecretAccessKey,
+          r2PublicBaseUrl: settings.r2PublicBaseUrl,
+          r2ObjectKeyPrefix: settings.r2ObjectKeyPrefix,
+          r2PresignExpiresSeconds: Number(settings.r2PresignExpiresSeconds) || 3600,
+          driveClientId: settings.driveClientId,
+          driveClientSecret: settings.driveClientSecret,
+          driveFolderId: settings.driveFolderId,
+          driveFolderName: settings.driveFolderName,
+          telegramEnabled: settings.telegramEnabled,
+          telegramBotToken: settings.telegramBotToken,
+          telegramApiBaseUrl: settings.telegramApiBaseUrl,
+          telegramAppBaseUrl: settings.telegramAppBaseUrl,
+          telegramDefaultAccountId: settings.telegramDefaultAccountId,
+          telegramAllowedChatIds: settings.telegramAllowedChatIds,
+          telegramTzOffset: settings.telegramTzOffset,
+          translateEnabled: settings.translateEnabled,
+          translateBaseUrl: settings.translateBaseUrl,
+          translateApiKey: settings.translateApiKey,
+          translateModel: settings.translateModel,
         }),
       });
 
@@ -4821,6 +6276,14 @@ function SettingsModule({ canAdmin }: { canAdmin: boolean }) {
         ...current,
         mostLoginApiKey: '',
         mostLoginApiKeyConfigured: current.mostLoginApiKeyConfigured || Boolean(current.mostLoginApiKey),
+        r2SecretAccessKey: '',
+        r2SecretConfigured: current.r2SecretConfigured || Boolean(current.r2SecretAccessKey),
+        driveClientSecret: '',
+        driveSecretConfigured: current.driveSecretConfigured || Boolean(current.driveClientSecret),
+        telegramBotToken: '',
+        telegramTokenConfigured: current.telegramTokenConfigured || Boolean(current.telegramBotToken),
+        translateApiKey: '',
+        translateApiKeyConfigured: current.translateApiKeyConfigured || Boolean(current.translateApiKey),
       }));
       enqueueSnackbar('Đã lưu cài đặt');
     } catch (error) {
@@ -4881,6 +6344,83 @@ function SettingsModule({ canAdmin }: { canAdmin: boolean }) {
       });
     } finally {
       setTestingMostLoginList(false);
+    }
+  }, [canAdmin, enqueueSnackbar]);
+
+  const testR2Connection = useCallback(async () => {
+    if (!canAdmin) return;
+
+    setTestingR2(true);
+
+    try {
+      const response = await fetch('/api/settings/r2/test/', {
+        method: 'POST',
+        headers: authJsonHeaders(),
+        body: JSON.stringify({
+          override: {
+            r2AccountId: settings.r2AccountId,
+            r2Endpoint: settings.r2Endpoint,
+            r2BucketName: settings.r2BucketName,
+            r2AccessKeyId: settings.r2AccessKeyId,
+            r2SecretAccessKey: settings.r2SecretAccessKey,
+          },
+        }),
+      });
+      const body = await response.json();
+
+      if (!response.ok || body.data?.ok === false) {
+        throw new Error(body.message || 'R2 connection failed');
+      }
+
+      enqueueSnackbar(body.message || 'R2 connection OK');
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Không thể test R2', {
+        variant: 'error',
+      });
+    } finally {
+      setTestingR2(false);
+    }
+  }, [canAdmin, enqueueSnackbar, settings]);
+
+  const testDriveConnection = useCallback(async () => {
+    if (!canAdmin) return;
+
+    setTestingDrive(true);
+
+    try {
+      const response = await fetch('/api/settings/drive/test/', { method: 'POST', headers: authJsonHeaders() });
+      const body = await response.json();
+
+      if (!response.ok || body.data?.ok === false) {
+        throw new Error(body.message || 'Google Drive connection failed');
+      }
+
+      enqueueSnackbar(body.message || 'Google Drive connection OK');
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Không thể test Google Drive', { variant: 'error' });
+    } finally {
+      setTestingDrive(false);
+    }
+  }, [canAdmin, enqueueSnackbar]);
+
+  const testTelegramConnection = useCallback(async () => {
+    if (!canAdmin) return;
+
+    setTestingTelegram(true);
+
+    try {
+      const response = await fetch('/api/settings/telegram/test/', { method: 'POST', headers: authJsonHeaders() });
+      const body = await response.json();
+
+      if (!response.ok || body.data?.ok === false) {
+        throw new Error(body.message || 'Telegram bot test failed');
+      }
+
+      enqueueSnackbar(body.message || 'Telegram bot OK');
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Không thể test Telegram bot', { variant: 'error' });
+    } finally {
+      setTestingTelegram(false);
     }
   }, [canAdmin, enqueueSnackbar]);
 
@@ -5050,6 +6590,383 @@ function SettingsModule({ canAdmin }: { canAdmin: boolean }) {
                     size="small"
                     color={settings.mostLoginApiKeyConfigured ? 'success' : 'warning'}
                     label={settings.mostLoginApiKeyConfigured ? 'API key đã cấu hình' : 'Chưa có API key'}
+                  />
+                </Stack>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+      </Grid>
+      <Grid item xs={12}>
+        <Card>
+          <CardHeader
+            title="Lưu trữ media (Storage)"
+            subheader="Chọn 1 nơi lưu trữ đám mây để backup media + preview UI. Publisher vẫn dùng file local."
+          />
+          <CardContent>
+            <Stack spacing={2}>
+              <TextField
+                select
+                fullWidth
+                disabled={!canAdmin}
+                label="Storage provider"
+                value={settings.storageProvider}
+                onChange={updateSettings('storageProvider')}
+                sx={{ maxWidth: 360 }}
+              >
+                <MenuItem value="none">Không dùng (chỉ local)</MenuItem>
+                <MenuItem value="r2">Cloudflare R2</MenuItem>
+                <MenuItem value="google_drive">Google Drive</MenuItem>
+              </TextField>
+              <Stack direction="row" spacing={1} flexWrap="wrap">
+                <Chip size="small" color="success" variant="soft" label={`Đã backup: ${storageStats.backedUp}`} />
+                <Chip size="small" color="error" variant="soft" label={`Lỗi: ${storageStats.failed}`} />
+                <Chip size="small" color="warning" variant="soft" label={`Chờ: ${storageStats.pending}`} />
+                <Chip size="small" color="default" variant="soft" label={`Bỏ qua: ${storageStats.skipped}`} />
+              </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
+      </Grid>
+      <Grid item xs={12}>
+        <Card sx={{ opacity: settings.storageProvider === 'r2' ? 1 : 0.6 }}>
+          <CardHeader
+            title="Cloudflare R2"
+            action={
+              settings.storageProvider === 'r2' ? (
+                <Chip size="small" color="success" label="Đang dùng" />
+              ) : undefined
+            }
+          />
+          <CardContent>
+            <Stack spacing={2}>
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    disabled={!canAdmin}
+                    label="Account ID"
+                    value={settings.r2AccountId}
+                    onChange={updateSettings('r2AccountId')}
+                  />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    disabled={!canAdmin}
+                    label="Endpoint (để trống = auto)"
+                    value={settings.r2Endpoint}
+                    onChange={updateSettings('r2Endpoint')}
+                  />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    disabled={!canAdmin}
+                    label="Bucket name"
+                    value={settings.r2BucketName}
+                    onChange={updateSettings('r2BucketName')}
+                  />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    disabled={!canAdmin}
+                    label="Access Key ID"
+                    value={settings.r2AccessKeyId}
+                    onChange={updateSettings('r2AccessKeyId')}
+                  />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    disabled={!canAdmin}
+                    type="password"
+                    label={settings.r2SecretConfigured ? 'Secret mới (để trống để giữ secret cũ)' : 'Secret Access Key'}
+                    value={settings.r2SecretAccessKey}
+                    onChange={updateSettings('r2SecretAccessKey')}
+                  />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    disabled={!canAdmin}
+                    label="Public Base URL (optional)"
+                    value={settings.r2PublicBaseUrl}
+                    onChange={updateSettings('r2PublicBaseUrl')}
+                  />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    disabled={!canAdmin}
+                    label="Object key prefix"
+                    value={settings.r2ObjectKeyPrefix}
+                    onChange={updateSettings('r2ObjectKeyPrefix')}
+                  />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    disabled={!canAdmin}
+                    label="Presign expires (giây)"
+                    value={settings.r2PresignExpiresSeconds}
+                    onChange={updateSettings('r2PresignExpiresSeconds')}
+                  />
+                </Grid>
+                <Grid item xs={12}>
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    <Button
+                      variant="outlined"
+                      disabled={!canAdmin || testingR2}
+                      startIcon={<Iconify icon="solar:cloud-upload-bold" />}
+                      onClick={testR2Connection}
+                    >
+                      Test connection
+                    </Button>
+                    <Chip
+                      size="small"
+                      color={settings.r2SecretConfigured ? 'success' : 'warning'}
+                      label={settings.r2SecretConfigured ? 'Secret đã cấu hình' : 'Chưa có secret'}
+                    />
+                  </Stack>
+                </Grid>
+              </Grid>
+            </Stack>
+          </CardContent>
+        </Card>
+      </Grid>
+      <Grid item xs={12}>
+        <Card sx={{ opacity: settings.storageProvider === 'google_drive' ? 1 : 0.6 }}>
+          <CardHeader
+            title="Google Drive"
+            subheader="OAuth — admin authorize 1 lần, Gami lưu refresh token (mã hoá)."
+            action={
+              settings.storageProvider === 'google_drive' ? (
+                <Chip size="small" color="success" label="Đang dùng" />
+              ) : undefined
+            }
+          />
+          <CardContent>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  disabled={!canAdmin}
+                  label="OAuth Client ID"
+                  value={settings.driveClientId}
+                  onChange={updateSettings('driveClientId')}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  disabled={!canAdmin}
+                  type="password"
+                  label={settings.driveSecretConfigured ? 'Client Secret mới (để trống để giữ secret cũ)' : 'OAuth Client Secret'}
+                  value={settings.driveClientSecret}
+                  onChange={updateSettings('driveClientSecret')}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  disabled={!canAdmin}
+                  label="Tên folder gốc"
+                  value={settings.driveFolderName}
+                  onChange={updateSettings('driveFolderName')}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  disabled={!canAdmin}
+                  label="Folder ID (optional, để trống = tạo tự động)"
+                  value={settings.driveFolderId}
+                  onChange={updateSettings('driveFolderId')}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <Button
+                    variant="contained"
+                    disabled={!canAdmin}
+                    startIcon={<Iconify icon="logos:google-icon" />}
+                    href="/api/auth/google"
+                  >
+                    {settings.driveConnected ? 'Kết nối lại Google' : 'Connect Google'}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    disabled={!canAdmin || testingDrive || !settings.driveConnected}
+                    startIcon={<Iconify icon="solar:cloud-upload-bold" />}
+                    onClick={testDriveConnection}
+                  >
+                    Test connection
+                  </Button>
+                  <Chip
+                    size="small"
+                    color={settings.driveConnected ? 'success' : 'warning'}
+                    label={settings.driveConnected ? `Đã kết nối: ${settings.driveConnectedEmail || 'OK'}` : 'Chưa kết nối'}
+                  />
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  Lưu Client ID/Secret trước, rồi bấm Connect Google để authorize. Scope drive.file (chỉ file Gami tạo).
+                </Typography>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+      </Grid>
+      <Grid item xs={12}>
+        <Card>
+          <CardHeader
+            title="Telegram bot"
+            subheader="Điều khiển từ xa: tạo nháp, lên lịch, đăng bài, duyệt qua Telegram. Chạy bằng: npm run telegram:bot"
+            action={
+              <FormControlLabel
+                control={
+                  <Switch checked={settings.telegramEnabled} disabled={!canAdmin} onChange={updateSettings('telegramEnabled')} />
+                }
+                label="Bật"
+              />
+            }
+          />
+          <CardContent>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  disabled={!canAdmin}
+                  type="password"
+                  label={settings.telegramTokenConfigured ? 'Bot token mới (để trống để giữ token cũ)' : 'Bot token (@BotFather)'}
+                  value={settings.telegramBotToken}
+                  onChange={updateSettings('telegramBotToken')}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  disabled={!canAdmin}
+                  label="Allowed chat IDs (CSV)"
+                  helperText="Gửi tin cho bot để xem chat ID của bạn"
+                  value={settings.telegramAllowedChatIds}
+                  onChange={updateSettings('telegramAllowedChatIds')}
+                />
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <TextField
+                  fullWidth
+                  disabled={!canAdmin}
+                  label="Default account ID"
+                  value={settings.telegramDefaultAccountId}
+                  onChange={updateSettings('telegramDefaultAccountId')}
+                />
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <TextField
+                  fullWidth
+                  disabled={!canAdmin}
+                  label="App base URL"
+                  value={settings.telegramAppBaseUrl}
+                  onChange={updateSettings('telegramAppBaseUrl')}
+                />
+              </Grid>
+              <Grid item xs={12} md={2}>
+                <TextField
+                  fullWidth
+                  disabled={!canAdmin}
+                  label="TZ offset"
+                  value={settings.telegramTzOffset}
+                  onChange={updateSettings('telegramTzOffset')}
+                />
+              </Grid>
+              <Grid item xs={12} md={2}>
+                <TextField
+                  fullWidth
+                  disabled={!canAdmin}
+                  label="API base URL"
+                  value={settings.telegramApiBaseUrl}
+                  onChange={updateSettings('telegramApiBaseUrl')}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <Button
+                    variant="outlined"
+                    disabled={!canAdmin || testingTelegram}
+                    startIcon={<Iconify icon="logos:telegram" />}
+                    onClick={testTelegramConnection}
+                  >
+                    Test bot
+                  </Button>
+                  <Chip
+                    size="small"
+                    color={settings.telegramTokenConfigured ? 'success' : 'warning'}
+                    label={settings.telegramTokenConfigured ? 'Token đã cấu hình' : 'Chưa có token'}
+                  />
+                </Stack>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+      </Grid>
+      <Grid item xs={12}>
+        <Card>
+          <CardHeader
+            title="AI dịch & Vietsub"
+            subheader="API và model AI tùy chỉnh (OpenAI-compatible) dùng cho dịch tiêu đề/caption và phụ đề Vietsub video."
+            action={
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={settings.translateEnabled}
+                    disabled={!canAdmin}
+                    onChange={updateSettings('translateEnabled')}
+                  />
+                }
+                label="Bật"
+              />
+            }
+          />
+          <CardContent>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  disabled={!canAdmin}
+                  label="API base URL"
+                  helperText="Mặc định https://api.openai.com/v1 — có thể trỏ sang endpoint OpenAI-compatible khác"
+                  value={settings.translateBaseUrl}
+                  onChange={updateSettings('translateBaseUrl')}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  disabled={!canAdmin}
+                  label="Model"
+                  helperText="VD: gpt-4o-mini, gpt-4o, ..."
+                  value={settings.translateModel}
+                  onChange={updateSettings('translateModel')}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  disabled={!canAdmin}
+                  type="password"
+                  label={settings.translateApiKeyConfigured ? 'API key mới (để trống để giữ key cũ)' : 'API key'}
+                  value={settings.translateApiKey}
+                  onChange={updateSettings('translateApiKey')}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Stack direction="row" spacing={2} alignItems="center" sx={{ height: '100%' }}>
+                  <Chip
+                    size="small"
+                    color={settings.translateApiKeyConfigured ? 'success' : 'warning'}
+                    label={settings.translateApiKeyConfigured ? 'API key đã cấu hình' : 'Chưa có API key'}
                   />
                 </Stack>
               </Grid>
