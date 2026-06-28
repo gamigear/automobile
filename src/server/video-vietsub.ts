@@ -1,8 +1,8 @@
-import path from 'node:path';
 import { spawn } from 'node:child_process';
 // settings
 import { getSourceDownloadSettings } from './source-download-settings';
 import { getTranslateConfig } from './translate-config';
+import { hostToContainer, containerToHost, containerReachable } from './bot-media-path';
 import { updateVietsubProgress, type VietsubPhase } from './vietsub-progress';
 
 const VIETSUB_TIMEOUT_MS = 30 * 60_000;
@@ -87,32 +87,6 @@ export type VietsubResult = {
   segments: number;
   duration: number;
 };
-
-// host path (dưới dataRoot) -> path container thấy (/data/...). Ngược lại của mapContainerPathToHostPath.
-function hostToContainer(hostPath: string): string {
-  const { dataRoot } = getSourceDownloadSettings();
-  const root = path.resolve(dataRoot);
-  const resolved = path.resolve(hostPath);
-  if (resolved === root || resolved.startsWith(root + path.sep)) {
-    return `/data/${resolved.slice(root.length).replace(/^[/\\]+/, '')}`.replace(/\\/g, '/');
-  }
-
-  return hostPath; // ngoài dataRoot -> để nguyên (script có thể không thấy)
-}
-
-function containerToHost(containerPath: string): string {
-  const { dataRoot } = getSourceDownloadSettings();
-  if (containerPath.startsWith('/data/')) {
-    return path.join(dataRoot, containerPath.replace(/^\/data\//, ''));
-  }
-
-  return containerPath;
-}
-
-// Đổi localhost/127.0.0.1 -> host.docker.internal để container gọi được service dịch trên host.
-function containerReachable(url: string): string {
-  return (url || '').replace(/localhost|127\.0\.0\.1/g, 'host.docker.internal');
-}
 
 export async function vietsubVideo(
   hostVideoPath: string,

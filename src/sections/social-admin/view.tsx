@@ -1216,6 +1216,8 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
   const [importingSource, setImportingSource] = useState(false);
   const [bulkLinks, setBulkLinks] = useState('');
   const [bulkImporting, setBulkImporting] = useState(false);
+  const [bulkCombineMode, setBulkCombineMode] = useState(false);
+  const [bulkAutoVietsub, setBulkAutoVietsub] = useState(false);
   const [createTab, setCreateTab] = useState<'single' | 'bulk' | 'history'>('bulk');
   const [postsTab, setPostsTab] = useState<'published' | 'scheduled' | 'draft'>('draft');
   const [localSourceImports, setLocalSourceImports] = useState<any[]>([]);
@@ -1525,33 +1527,48 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
     setBulkImporting(true);
 
     try {
-      const response = await fetch(`/api/accounts/${accountId}/source-imports/bulk/`, {
+      const endpoint = bulkCombineMode
+        ? `/api/accounts/${accountId}/source-imports/combine/`
+        : `/api/accounts/${accountId}/source-imports/bulk/`;
+      const body: any = { text: bulkLinks, platform: sourceImportForm.platform };
+      if (bulkCombineMode) {
+        body.autoVietsub = bulkAutoVietsub;
+        body.contextHint = vietsubHint;
+      }
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: authJsonHeaders(),
-        body: JSON.stringify({ text: bulkLinks, platform: sourceImportForm.platform }),
+        body: JSON.stringify(body),
       });
-      const body = await response.json();
+      const bodyData = await response.json();
 
-      if (!response.ok) throw new Error(body.message || 'Không thể tạo loạt bài từ danh sách link');
+      if (!response.ok) throw new Error(bodyData.message || 'Không thể tạo loạt bài từ danh sách link');
 
-      if (Array.isArray(body.data) && body.data.length) {
+      if (Array.isArray(bodyData.data) && bodyData.data.length) {
         setLocalSourceImports((current) => {
           const byId = new Map(current.map((row) => [row.id, row]));
-          body.data.forEach((row: any) => byId.set(row.id, row));
+          bodyData.data.forEach((row: any) => byId.set(row.id, row));
           return Array.from(byId.values());
         });
         setBulkLinks('');
       }
 
-      enqueueSnackbar(body.message || `Đã đưa ${body.summary?.queued || 0} link vào hàng xử lý`, {
-        variant: body.summary?.queued ? 'success' : 'warning',
+      enqueueSnackbar(bodyData.message || `Đã đưa ${bodyData.summary?.queued || 0} link vào hàng xử lý`, {
+        variant: bodyData.summary?.queued ? 'success' : 'warning',
       });
+
+      if (bulkCombineMode) {
+        setBulkCombineMode(false);
+        setBulkAutoVietsub(false);
+        setCreateTab('history');
+      }
     } catch (error) {
       enqueueSnackbar(error instanceof Error ? error.message : 'Không thể tạo loạt bài từ danh sách link', { variant: 'error' });
     } finally {
       setBulkImporting(false);
     }
-  }, [accountId, bulkLinks, enqueueSnackbar, sourceImportForm.platform]);
+  }, [accountId, bulkLinks, enqueueSnackbar, sourceImportForm.platform, bulkCombineMode, bulkAutoVietsub, vietsubHint]);
 
   const [applyingTemplate, setApplyingTemplate] = useState(false);
   const [publishingPostId, setPublishingPostId] = useState('');
@@ -2148,15 +2165,79 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
                 />
               </Grid>
               <Grid item xs={12}>
-                <Button
-                  size="large"
-                  variant="contained"
-                  disabled={!canCreate || bulkImporting || !bulkLinks.trim()}
-                  onClick={createBulkSourceImports}
-                  startIcon={<Iconify icon={bulkImporting ? 'solar:refresh-bold' : 'solar:playlist-bold'} />}
-                >
-                  {bulkImporting ? 'Đang đưa vào hàng xử lý' : 'Tạo loạt bài từ danh sách'}
-                </Button>
+                <Stack spacing={2}>
+                  <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap alignItems="center">
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={bulkCombineMode}
+                          onChange={(e) => setBulkCombineMode(e.target.checked)}
+                          disabled={bulkImporting}
+                        />
+                      }
+                      label="Nối thành 1 video dài (chỉ video)"
+                    />
+                    {bulkCombineMode && (
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={bulkAutoVietsub}
+                            onChange={(e) => setBulkAutoVietsub(e.target.checked)}
+                            disabled={bulkImporting}
+                          />
+                        }
+                        label="Tự vietsub sau khi ghép"
+                      />
+                    )}
+                  </Stack>
+                  {bulkCombineMode && bulkAutoVietsub && (
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <TextField
+                        select
+                        size="small"
+                        label="Template bối cảnh"
+                        value={selectedTemplateId}
+                        onChange={(e) => applyVietsubTemplate(e.target.value)}
+                        sx={{ minWidth: 260 }}
+                        disabled={bulkImporting}
+                      >
+                        <MenuItem value="">
+                          <em>— Tự nhập —</em>
+                        </MenuItem>
+                        {vietsubTemplates.map((t) => (
+                          <MenuItem key={t.id} value={t.id}>
+                            {t.builtin ? '★ ' : ''}
+                            {t.name}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                      <TextField
+                        size="small"
+                        label="Hoặc nhập bối cảnh"
+                        value={vietsubHint}
+                        onChange={(e) => {
+                          setVietsubHint(e.target.value);
+                          if (selectedTemplateId) setSelectedTemplateId('');
+                        }}
+                        disabled={bulkImporting}
+                        sx={{ minWidth: 300 }}
+                      />
+                    </Stack>
+                  )}
+                  <Button
+                    size="large"
+                    variant="contained"
+                    disabled={!canCreate || bulkImporting || !bulkLinks.trim()}
+                    onClick={createBulkSourceImports}
+                    startIcon={<Iconify icon={bulkImporting ? 'solar:refresh-bold' : 'solar:playlist-bold'} />}
+                  >
+                    {bulkImporting
+                      ? 'Đang đưa vào hàng xử lý'
+                      : bulkCombineMode
+                        ? 'Ghép thành 1 bài nháp'
+                        : 'Tạo loạt bài từ danh sách'}
+                  </Button>
+                </Stack>
               </Grid>
             </Grid>
           )}

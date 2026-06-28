@@ -1,4 +1,3 @@
-import path from 'node:path';
 import fs from 'node:fs';
 import { NextResponse } from 'next/server';
 // db + auth
@@ -7,6 +6,7 @@ import { requireRole } from 'src/lib/api-auth';
 import { formatPostRow } from 'src/lib/api-formatters';
 // service
 import { vietsubVideo } from 'src/server/video-vietsub';
+import { attachVietsubVariant } from 'src/server/attach-vietsub-variant';
 import { startVietsubProgress, finishVietsubProgress } from 'src/server/vietsub-progress';
 
 // ----------------------------------------------------------------------
@@ -60,51 +60,16 @@ export async function POST(request: Request, { params }: Params) {
   try {
     const result = await vietsubVideo(orig.localPath as string, post.id, { contextHint });
 
-    if (!fs.existsSync(result.outputHostPath)) {
-      finishVietsubProgress(post.id, 'Không thấy file output');
-      return NextResponse.json({ message: 'Vietsub xong nhưng không thấy file output' }, { status: 500 });
-    }
+    await attachVietsubVariant(post.id, orig, result, params.accountId);
 
-    const size = fs.statSync(result.outputHostPath).size;
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const variant = await tx.mediaAsset.upsert({
-        where: { provider_externalId: { provider: orig.provider, externalId: `${orig.externalId}:vietsub` } },
-        update: { localPath: result.outputHostPath, webViewLink: result.outputHostPath, size: BigInt(size) },
-        create: {
-          provider: orig.provider,
-          externalId: `${orig.externalId}:vietsub`,
-          deviceId: orig.deviceId || undefined,
-          socialAccountId: orig.socialAccountId || params.accountId,
-          sourceImportId: orig.sourceImportId || undefined,
-          name: `${path.parse(orig.name).name}.vietsub.mp4`,
-          mimeType: 'video/mp4',
-          size: BigInt(size),
-          webViewLink: result.outputHostPath,
-          localPath: result.outputHostPath,
-          folderName: orig.folderName,
-          category: 'vietsub',
-        },
-      });
-
-      // Gắn biến thể vào bài (nếu chưa có).
-      const existing = await tx.postMedia.findUnique({
-        where: { postId_mediaAssetId: { postId: post.id, mediaAssetId: variant.id } },
-      });
-      if (!existing) {
-        const maxOrder = Math.max(0, ...post.media.map((m) => m.sortOrder || 0));
-        await tx.postMedia.create({ data: { postId: post.id, mediaAssetId: variant.id, sortOrder: maxOrder + 1 } });
-      }
-
-      return tx.post.findUnique({
-        where: { id: post.id },
-        include: {
-          createdBy: true,
-          socialAccount: true,
-          targets: { include: { socialAccount: true } },
-          media: { include: { mediaAsset: true }, orderBy: { sortOrder: 'asc' } },
-        },
-      });
+    const updated = await prisma.post.findUnique({
+      where: { id: post.id },
+      include: {
+        createdBy: true,
+        socialAccount: true,
+        targets: { include: { socialAccount: true } },
+        media: { include: { mediaAsset: true }, orderBy: { sortOrder: 'asc' } },
+      },
     });
 
     finishVietsubProgress(post.id);
