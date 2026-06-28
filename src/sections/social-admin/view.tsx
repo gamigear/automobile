@@ -1218,6 +1218,7 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
   const [bulkImporting, setBulkImporting] = useState(false);
   const [bulkCombineMode, setBulkCombineMode] = useState(false);
   const [bulkAutoVietsub, setBulkAutoVietsub] = useState(false);
+  const [bulkAspectRatio, setBulkAspectRatio] = useState<'16:9' | '9:16' | '1:1' | '3:4'>('9:16');
   const [createTab, setCreateTab] = useState<'single' | 'bulk' | 'history'>('bulk');
   const [postsTab, setPostsTab] = useState<'published' | 'scheduled' | 'draft'>('draft');
   const [localSourceImports, setLocalSourceImports] = useState<any[]>([]);
@@ -1534,6 +1535,7 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
       if (bulkCombineMode) {
         body.autoVietsub = bulkAutoVietsub;
         body.contextHint = vietsubHint;
+        body.aspectRatio = bulkAspectRatio;
       }
 
       const response = await fetch(endpoint, {
@@ -1568,7 +1570,7 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
     } finally {
       setBulkImporting(false);
     }
-  }, [accountId, bulkLinks, enqueueSnackbar, sourceImportForm.platform, bulkCombineMode, bulkAutoVietsub, vietsubHint]);
+  }, [accountId, bulkLinks, enqueueSnackbar, sourceImportForm.platform, bulkCombineMode, bulkAutoVietsub, bulkAspectRatio, vietsubHint]);
 
   const [applyingTemplate, setApplyingTemplate] = useState(false);
   const [publishingPostId, setPublishingPostId] = useState('');
@@ -2188,6 +2190,22 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
                         }
                         label="Tự vietsub sau khi ghép"
                       />
+                    )}
+                    {bulkCombineMode && (
+                      <TextField
+                        select
+                        size="small"
+                        label="Khung video"
+                        value={bulkAspectRatio}
+                        onChange={(e) => setBulkAspectRatio(e.target.value as typeof bulkAspectRatio)}
+                        sx={{ minWidth: 160 }}
+                        disabled={bulkImporting}
+                      >
+                        <MenuItem value="9:16">9:16 (dọc)</MenuItem>
+                        <MenuItem value="16:9">16:9 (ngang)</MenuItem>
+                        <MenuItem value="1:1">1:1 (vuông)</MenuItem>
+                        <MenuItem value="3:4">3:4 (dọc nhẹ)</MenuItem>
+                      </TextField>
                     )}
                   </Stack>
                   {bulkCombineMode && bulkAutoVietsub && (

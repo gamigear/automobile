@@ -15,7 +15,7 @@ import {
 } from './source-download-adapters';
 import { translateSourceContent } from './source-content-translation';
 import { getImportSpacingMs } from './source-import-processor';
-import { concatVideos } from './video-concat';
+import { concatVideos, type ConcatAspectRatio } from './video-concat';
 import { vietsubVideo } from './video-vietsub';
 import { attachVietsubVariant } from './attach-vietsub-variant';
 
@@ -49,7 +49,7 @@ type DownloadedVideo = {
   download: NormalizedSourceDownload;
 };
 
-export type CombineOptions = { autoVietsub?: boolean; contextHint?: string };
+export type CombineOptions = { autoVietsub?: boolean; contextHint?: string; aspectRatio?: ConcatAspectRatio };
 
 // Fire-and-forget. Tiến độ theo dõi qua status từng SourceImport + danh sách bài nháp.
 export async function processCombineImports(importIds: string[], opts: CombineOptions = {}) {
@@ -143,7 +143,8 @@ export async function processCombineImports(importIds: string[], opts: CombineOp
       fs.mkdirSync(outDir, { recursive: true });
       const result = await concatVideos(
         downloaded.map((d) => d.videoHostPath),
-        path.join(outDir, 'combined.mp4')
+        path.join(outDir, 'combined.mp4'),
+        { aspectRatio: opts.aspectRatio }
       );
       mergedHostPath = result.outputHostPath;
     } else {

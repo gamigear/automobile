@@ -21,6 +21,7 @@ const CombineSchema = z.object({
   platform: z.enum(['auto', 'xsh', 'douyin']).default('auto'),
   autoVietsub: z.boolean().optional(),
   contextHint: z.string().max(2000).optional(),
+  aspectRatio: z.enum(['16:9', '9:16', '1:1', '3:4']).optional(),
 });
 
 const ACTIVE_STATUSES: SourceImportStatus[] = [
@@ -124,10 +125,11 @@ export async function POST(request: Request, { params }: Params) {
   );
 
   // Fire-and-forget: tải + nối + tạo nháp + (tuỳ chọn) vietsub chạy nền.
-  processCombineImports(
-    created.map((row) => row.id),
-    { autoVietsub: parsed.data.autoVietsub, contextHint: parsed.data.contextHint }
-  ).catch((error) => console.error('combine source import failed', error));
+  processCombineImports(created.map((row) => row.id), {
+    autoVietsub: parsed.data.autoVietsub,
+    contextHint: parsed.data.contextHint,
+    aspectRatio: parsed.data.aspectRatio,
+  }).catch((error) => console.error('combine source import failed', error));
 
   return NextResponse.json(
     {
