@@ -1189,6 +1189,9 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const vietsubTimer = useRef<any>(null);
   const vietsubPollTimer = useRef<any>(null);
+  const [dubBusy, setDubBusy] = useState(false);
+  const [dubVoice, setDubVoice] = useState<'vi-VN-HoaiMyNeural' | 'vi-VN-NamMinhNeural'>('vi-VN-HoaiMyNeural');
+  const [dubBurnSub, setDubBurnSub] = useState(false);
   const [deviceForm, setDeviceForm] = useState({
     deviceId: '',
     role: 'BACKUP',
@@ -1858,6 +1861,66 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
       enqueueSnackbar(error instanceof Error ? error.message : 'Không thể xoá bản vietsub', { variant: 'error' });
     } finally {
       setVietsubBusy(false);
+    }
+  }, [accountId, postId, enqueueSnackbar]);
+
+  const runDub = useCallback(async () => {
+    if (!accountId || !postId) return;
+    setDubBusy(true);
+    setVietsubElapsed(0);
+    setVietsubProgress({ percent: 2, label: 'Đang chuẩn bị…' });
+    clearInterval(vietsubTimer.current);
+    vietsubTimer.current = setInterval(() => setVietsubElapsed((s) => s + 1), 1000);
+
+    clearInterval(vietsubPollTimer.current);
+    vietsubPollTimer.current = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/accounts/${accountId}/posts/${postId}/vietsub/progress/`, {
+          headers: authJsonHeaders(),
+        });
+        const b = await r.json();
+        if (b?.data) setVietsubProgress({ percent: b.data.percent ?? 0, label: b.data.label || '' });
+      } catch {
+        // bỏ qua lỗi poll
+      }
+    }, 1500);
+
+    try {
+      const res = await fetch(`/api/accounts/${accountId}/posts/${postId}/dub/`, {
+        method: 'POST',
+        headers: authJsonHeaders(),
+        body: JSON.stringify({ voice: dubVoice, burnSub: dubBurnSub, contextHint: vietsubHint }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || 'Lồng tiếng thất bại');
+      if (body.data) setPostDetail(body.data);
+      enqueueSnackbar(body.message || 'Đã tạo bản lồng tiếng');
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Lồng tiếng thất bại', { variant: 'error' });
+    } finally {
+      clearInterval(vietsubTimer.current);
+      clearInterval(vietsubPollTimer.current);
+      setVietsubProgress(null);
+      setDubBusy(false);
+    }
+  }, [accountId, postId, enqueueSnackbar, dubVoice, dubBurnSub, vietsubHint]);
+
+  const removeDub = useCallback(async () => {
+    if (!accountId || !postId) return;
+    setDubBusy(true);
+    try {
+      const res = await fetch(`/api/accounts/${accountId}/posts/${postId}/dub/`, {
+        method: 'DELETE',
+        headers: authJsonHeaders(),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || 'Không thể xoá bản lồng tiếng');
+      if (body.data) setPostDetail(body.data);
+      enqueueSnackbar(body.message || 'Đã xoá bản lồng tiếng');
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Không thể xoá bản lồng tiếng', { variant: 'error' });
+    } finally {
+      setDubBusy(false);
     }
   }, [accountId, postId, enqueueSnackbar]);
 
@@ -2599,7 +2662,7 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
                     <Button
                       variant="outlined"
                       color="secondary"
-                      disabled={!canCreate || vietsubBusy}
+                      disabled={!canCreate || vietsubBusy || dubBusy}
                       startIcon={vietsubBusy ? <CircularProgress size={16} /> : <Iconify icon="solar:subtitles-bold" />}
                       onClick={runVietsub}
                     >
@@ -2616,15 +2679,55 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
                         Xoá bản vietsub
                       </Button>
                     )}
+                    <Button
+                      variant="outlined"
+                      color="secondary"
+                      disabled={!canCreate || vietsubBusy || dubBusy}
+                      startIcon={dubBusy ? <CircularProgress size={16} /> : <Iconify icon="solar:microphone-bold" />}
+                      onClick={runDub}
+                    >
+                      {dubBusy ? `Đang lồng tiếng… ${vietsubElapsed}s` : 'Lồng tiếng'}
+                    </Button>
+                    {postDetail?.media?.some((m: any) => m.category === 'dub') && (
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        disabled={!canCreate || dubBusy}
+                        startIcon={<Iconify icon="solar:trash-bin-trash-bold" />}
+                        onClick={removeDub}
+                      >
+                        Xoá bản lồng tiếng
+                      </Button>
+                    )}
                     <Button variant="outlined" href={`${paths.dashboard.accounts}/${accountId}`}>
                       Quay lại workspace
                     </Button>
                   </Stack>
-                  {vietsubBusy && (
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+                    <TextField
+                      select
+                      size="small"
+                      label="Giọng lồng tiếng"
+                      value={dubVoice}
+                      onChange={(e) => setDubVoice(e.target.value as typeof dubVoice)}
+                      sx={{ minWidth: 200 }}
+                      disabled={dubBusy}
+                    >
+                      <MenuItem value="vi-VN-HoaiMyNeural">Nữ (HoaiMy)</MenuItem>
+                      <MenuItem value="vi-VN-NamMinhNeural">Nam (NamMinh)</MenuItem>
+                    </TextField>
+                    <FormControlLabel
+                      control={
+                        <Switch checked={dubBurnSub} onChange={(e) => setDubBurnSub(e.target.checked)} disabled={dubBusy} />
+                      }
+                      label="Burn phụ đề kèm"
+                    />
+                  </Stack>
+                  {(vietsubBusy || dubBusy) && (
                     <Box sx={{ width: '100%', maxWidth: 420 }}>
                       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.5 }}>
                         <Typography variant="caption" color="text.secondary">
-                          {vietsubProgress?.label || 'Đang xử lý vietsub…'}
+                          {vietsubProgress?.label || (dubBusy ? 'Đang lồng tiếng…' : 'Đang xử lý vietsub…')}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
                           {vietsubProgress ? `${Math.round(vietsubProgress.percent)}% · ` : ''}{vietsubElapsed}s

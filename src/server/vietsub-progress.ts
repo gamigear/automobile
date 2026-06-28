@@ -8,6 +8,8 @@ export type VietsubPhase =
   | 'transcribing'
   | 'translating'
   | 'burning'
+  | 'synthesizing' // lồng tiếng: tổng hợp giọng TTS
+  | 'muxing' // lồng tiếng: ghép giọng vào video
   | 'done'
   | 'error';
 
@@ -29,6 +31,8 @@ const PHASE_PERCENT: Record<VietsubPhase, number> = {
   transcribing: 35,
   translating: 70,
   burning: 85,
+  synthesizing: 80,
+  muxing: 92,
   done: 100,
   error: 100,
 };
