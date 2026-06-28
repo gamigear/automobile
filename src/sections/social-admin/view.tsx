@@ -1183,6 +1183,10 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
   const [vietsubElapsed, setVietsubElapsed] = useState(0);
   const [vietsubProgress, setVietsubProgress] = useState<{ percent: number; label: string } | null>(null);
   const [vietsubHint, setVietsubHint] = useState('');
+  const [vietsubTemplates, setVietsubTemplates] = useState<
+    Array<{ id: string; name: string; hint: string; builtin?: boolean }>
+  >([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const vietsubTimer = useRef<any>(null);
   const vietsubPollTimer = useRef<any>(null);
   const [deviceForm, setDeviceForm] = useState({
@@ -1838,6 +1842,72 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
     }
   }, [accountId, postId, enqueueSnackbar]);
 
+  const loadVietsubTemplates = useCallback(async () => {
+    try {
+      const res = await fetch('/api/vietsub-templates/', { headers: authJsonHeaders() });
+      const body = await res.json();
+      if (Array.isArray(body?.data)) setVietsubTemplates(body.data);
+    } catch {
+      // bỏ qua lỗi tải template
+    }
+  }, []);
+
+  useEffect(() => {
+    loadVietsubTemplates();
+  }, [loadVietsubTemplates]);
+
+  const applyVietsubTemplate = useCallback(
+    (id: string) => {
+      setSelectedTemplateId(id);
+      const t = vietsubTemplates.find((x) => x.id === id);
+      if (t) setVietsubHint(t.hint);
+    },
+    [vietsubTemplates]
+  );
+
+  const saveVietsubTemplate = useCallback(async () => {
+    const hint = vietsubHint.trim();
+    if (!hint) {
+      enqueueSnackbar('Nhập nội dung bối cảnh trước khi lưu', { variant: 'warning' });
+      return;
+    }
+    const name = window.prompt('Đặt tên cho template bối cảnh:');
+    if (!name || !name.trim()) return;
+    try {
+      const res = await fetch('/api/vietsub-templates/', {
+        method: 'POST',
+        headers: authJsonHeaders(),
+        body: JSON.stringify({ name: name.trim(), hint }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || 'Không lưu được template');
+      enqueueSnackbar('Đã lưu template');
+      await loadVietsubTemplates();
+      if (body?.data?.id) setSelectedTemplateId(body.data.id);
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Không lưu được template', { variant: 'error' });
+    }
+  }, [vietsubHint, enqueueSnackbar, loadVietsubTemplates]);
+
+  const removeVietsubTemplate = useCallback(
+    async (id: string) => {
+      try {
+        const res = await fetch(`/api/vietsub-templates/?id=${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          headers: authJsonHeaders(),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.message || 'Không xoá được template');
+        enqueueSnackbar('Đã xoá template');
+        if (selectedTemplateId === id) setSelectedTemplateId('');
+        await loadVietsubTemplates();
+      } catch (error) {
+        enqueueSnackbar(error instanceof Error ? error.message : 'Không xoá được template', { variant: 'error' });
+      }
+    },
+    [enqueueSnackbar, loadVietsubTemplates, selectedTemplateId]
+  );
+
   const saveFavoriteMusic = useCallback(async () => {
     if (!canAdmin || !accountId) return;
 
@@ -2364,18 +2434,65 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
                       />
                     </Stack>
                   )}
-                  <TextField
-                    fullWidth
-                    multiline
-                    minRows={2}
-                    size="small"
-                    label="Bối cảnh / nhân vật (gợi ý dịch xưng hô)"
-                    placeholder="VD: Hội thoại giữa giám đốc nam lớn tuổi và nữ thư ký trẻ; xưng hô lịch sự. Nhân vật chính tên Lâm (nam)."
-                    helperText="Tuỳ chọn — giúp AI chọn anh/em/chị/ông/bà… đúng vai vế & giới tính."
-                    value={vietsubHint}
-                    onChange={(e) => setVietsubHint(e.target.value)}
-                    disabled={vietsubBusy}
-                  />
+                  <Stack spacing={1}>
+                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                      <TextField
+                        select
+                        size="small"
+                        label="Template bối cảnh"
+                        value={selectedTemplateId}
+                        onChange={(e) => applyVietsubTemplate(e.target.value)}
+                        sx={{ minWidth: 260 }}
+                        disabled={vietsubBusy}
+                      >
+                        <MenuItem value="">
+                          <em>— Tự nhập —</em>
+                        </MenuItem>
+                        {vietsubTemplates.map((t) => (
+                          <MenuItem key={t.id} value={t.id}>
+                            {t.builtin ? '★ ' : ''}
+                            {t.name}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                      <Button
+                        size="small"
+                        variant="text"
+                        onClick={saveVietsubTemplate}
+                        disabled={vietsubBusy}
+                        startIcon={<Iconify icon="solar:bookmark-bold" />}
+                      >
+                        Lưu làm template
+                      </Button>
+                      {selectedTemplateId && !selectedTemplateId.startsWith('builtin-') && (
+                        <Button
+                          size="small"
+                          variant="text"
+                          color="error"
+                          onClick={() => removeVietsubTemplate(selectedTemplateId)}
+                          disabled={vietsubBusy}
+                          startIcon={<Iconify icon="solar:trash-bin-trash-bold" />}
+                        >
+                          Xoá template
+                        </Button>
+                      )}
+                    </Stack>
+                    <TextField
+                      fullWidth
+                      multiline
+                      minRows={2}
+                      size="small"
+                      label="Bối cảnh / nhân vật (gợi ý dịch xưng hô)"
+                      placeholder="VD: Hội thoại giữa giám đốc nam lớn tuổi và nữ thư ký trẻ; xưng hô lịch sự. Nhân vật chính tên Lâm (nam)."
+                      helperText="Tuỳ chọn — chọn template sẵn ở trên hoặc tự nhập. Giúp AI chọn anh/em/chị/ông/bà… đúng vai vế & giới tính."
+                      value={vietsubHint}
+                      onChange={(e) => {
+                        setVietsubHint(e.target.value);
+                        if (selectedTemplateId) setSelectedTemplateId('');
+                      }}
+                      disabled={vietsubBusy}
+                    />
+                  </Stack>
                   <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
                     <Button variant="contained" disabled={!canCreate || savingPostDetail} onClick={savePostDetail}>
                       Lưu thay đổi
