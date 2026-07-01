@@ -24,11 +24,13 @@ enum PostStatus {
   PUBLISHED
   FAILED
   CANCELLED
+  SCHEDULED_EXTERNAL   // TT Studio đã accept schedule, Gami không can thiệp nữa
 }
 
 enum Platform {
   FACEBOOK
   INSTAGRAM
+  TIKTOK
 }
 
 enum SocialAccountType {
@@ -36,6 +38,8 @@ enum SocialAccountType {
   PROFILE
   INSTAGRAM_BUSINESS
   INSTAGRAM_CREATOR
+  TIKTOK_PERSONAL    // analog của PROFILE — đăng qua app TikTok
+  TIKTOK_BUSINESS    // analog của FANPAGE — đăng qua TikTok Studio (built-in schedule)
 }
 
 enum DeviceType {
@@ -133,6 +137,7 @@ model SocialAccount {
   approvalRequired Boolean      @default(true)
   defaultTimezone  String       @default("Asia/Ho_Chi_Minh")
   defaultScheduleSlots Json?
+  tiktokFavoriteMusic  Json?
   active           Boolean      @default(true)
   posts            Post[]
   targets          PostTarget[]
@@ -142,6 +147,7 @@ model SocialAccount {
   members          SocialAccountMember[]
   jobs             JobLog[]
   sourceImports    SourceImport[]
+  telegramBots     TelegramBot[]
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
@@ -165,6 +171,8 @@ model Device {
   locked         Boolean       @default(false)
   lockedAt       DateTime?
   lockedReason   String?
+  publishBusyPostId String?
+  publishBusyAt     DateTime?
   notes          String?
   lastSeenAt     DateTime?
   accounts       SocialAccountDevice[]
@@ -173,11 +181,35 @@ model Device {
   posts          Post[]
   mediaAssets    MediaAsset[]
   contentSources ContentSource[]
+  telegramBots   TelegramBot[]
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
   @@unique([provider, externalId])
   @@unique([provider, adbId])
+}
+
+enum TelegramBotBinding {
+  ACCOUNT
+  DEVICE
+}
+
+model TelegramBot {
+  id              String             @id @default(cuid())
+  label           String
+  botToken        String             // mã hoá bằng secret-crypto
+  enabled         Boolean            @default(true)
+  binding         TelegramBotBinding @default(ACCOUNT)
+  socialAccountId String?
+  socialAccount   SocialAccount?     @relation(fields: [socialAccountId], references: [id])
+  deviceId        String?
+  device          Device?            @relation(fields: [deviceId], references: [id])
+  allowedChatIds  String             @default("")
+  tzOffset        String             @default("+07:00")
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([enabled])
 }
 
 model SocialAccountDevice {
@@ -237,6 +269,14 @@ model Post {
   sourceUrl   String?
   sourcePlatform SourcePlatform?
   scheduledAt DateTime?
+  publishAttempts Int        @default(0)
+  nextPublishAt   DateTime?
+  lastPublishError String?
+  publishedAt     DateTime?
+  publishMode     String?    @default("gami")  // 'gami' | 'external_tiktok_studio'
+  tiktokMusicName    String?
+  tiktokMuteOriginal Boolean   @default(false)
+  tiktokRandomMusic  Boolean   @default(false)
   createdById String
   createdBy   User          @relation(fields: [createdById], references: [id])
   targets     PostTarget[]
@@ -281,10 +321,22 @@ model MediaAsset {
   socialAccountId String?
   socialAccount   SocialAccount? @relation(fields: [socialAccountId], references: [id])
   posts           PostMedia[]
+  storageProvider    String?
+  storageKey         String?
+  storageBucket      String?
+  storageEtag        String?
+  storageWebViewLink String?
+  storageThumbKey    String?
+  storageUploadedAt  DateTime?
+  storageStatus      String    @default("pending")
+  storageError       String?
+  storageAttempts    Int       @default(0)
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
   @@unique([provider, externalId])
+  @@index([storageStatus])
+  @@index([storageProvider])
 }
 
 model SourceImport {
@@ -334,6 +386,7 @@ model ContentSource {
   externalId String
   active     Boolean  @default(true)
   lastSyncAt DateTime?
+  metadata   Json?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

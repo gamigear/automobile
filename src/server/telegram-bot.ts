@@ -1,46 +1,30 @@
-import { signAccessToken } from 'src/lib/auth-token';
+/* eslint-disable no-await-in-loop */
+import {
+  getTelegramConfig,
+  resolveBotConfig,
+  listEnabledBotIds,
+  type TelegramConfig,
+} from './telegram/config';
+import { handleMessage, type BotCtx } from './telegram/commands';
+import { handleCallback } from './telegram/callbacks';
+import { initWatcher } from './telegram/watch';
+
+// ----------------------------------------------------------------------
+// Gami Telegram bot — điều khiển từ xa (tạo nháp / list / lên lịch / đăng / duyệt).
+// Cấu hình đọc động từ Settings (AppSetting) + env fallback -> đổi không cần restart.
 
 type TelegramUpdate = {
   update_id: number;
-  message?: {
-    chat: { id: number };
-    text?: string;
+  message?: { chat: { id: number }; text?: string };
+  callback_query?: {
+    id: string;
+    data?: string;
+    message?: { chat: { id: number } };
   };
 };
 
-const token = process.env.TELEGRAM_BOT_TOKEN || '';
-const apiBaseUrl = process.env.TELEGRAM_API_BASE_URL || 'https://api.telegram.org';
-const appBaseUrl = process.env.TELEGRAM_APP_BASE_URL || process.env.NEXTAUTH_URL || 'http://localhost:8081';
-const defaultAccountId = process.env.TELEGRAM_DEFAULT_SOCIAL_ACCOUNT_ID || '';
-const allowedChatIds = (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '')
-  .split(',')
-  .map((value) => value.trim())
-  .filter(Boolean);
-
-function adminToken() {
-  return signAccessToken({
-    sub: 'admin',
-    email: process.env.ADMIN_EMAIL || 'admin@gami.local',
-    name: 'Admin',
-    role: 'ADMIN',
-  });
-}
-
-function extractUrl(text: string) {
-  return text.match(/https?:\/\/\S+/)?.[0] || '';
-}
-
-function detectPlatform(url: string) {
-  if (/xhslink|xiaohongshu|xhscdn/i.test(url)) return 'xsh';
-  if (/douyin|iesdouyin|tiktok/i.test(url)) return 'douyin';
-
-  return 'auto';
-}
-
-async function telegram(method: string, body: Record<string, unknown>) {
-  if (!token) throw new Error('TELEGRAM_BOT_TOKEN is required');
-
-  const response = await fetch(`${apiBaseUrl}/bot${token}/${method}`, {
+async function telegram(cfg: TelegramConfig, method: string, body: Record<string, unknown>) {
+  const response = await fetch(`${cfg.apiBaseUrl}/bot${cfg.botToken}/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -51,87 +35,169 @@ async function telegram(method: string, body: Record<string, unknown>) {
   return response.json();
 }
 
-async function sendMessage(chatId: number, text: string) {
-  await telegram('sendMessage', { chat_id: chatId, text });
-}
-
-async function createSourceImport(accountId: string, url: string) {
-  const response = await fetch(`${appBaseUrl}/api/accounts/${accountId}/source-imports/`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${adminToken()}`,
+function makeCtx(cfg: TelegramConfig): BotCtx & { answer: (id: string, text?: string) => Promise<void> } {
+  return {
+    config: cfg,
+    send: async (chatId, text, replyMarkup) => {
+      await telegram(cfg, 'sendMessage', {
+        chat_id: chatId,
+        text,
+        parse_mode: 'Markdown',
+        reply_markup: replyMarkup,
+        disable_web_page_preview: true,
+      });
     },
-    body: JSON.stringify({ url, platform: detectPlatform(url) }),
-  });
-  const body = await response.json();
-
-  if (!response.ok) throw new Error(body.message || 'Không thể tạo nháp từ link');
-
-  return body;
+    answer: async (callbackId, text) => {
+      await telegram(cfg, 'answerCallbackQuery', { callback_query_id: callbackId, text: text || undefined }).catch(
+        () => undefined
+      );
+    },
+  };
 }
 
-async function handleUpdate(update: TelegramUpdate) {
-  const message = update.message;
+function isAllowed(cfg: TelegramConfig, chatId: number): boolean {
+  // Rỗng = chưa cấu hình -> chặn (an toàn). Buộc admin set allowed chat ids.
+  if (!cfg.allowedChatIds.length) return false;
+
+  return cfg.allowedChatIds.includes(String(chatId));
+}
+
+let watcherStarted = false;
+
+async function handleUpdate(cfg: TelegramConfig, update: TelegramUpdate) {
+  const ctx = makeCtx(cfg);
+
+  // Callback (nút inline)
+  if (update.callback_query) {
+    const cq = update.callback_query;
+    const chatId = cq.message?.chat.id;
+    if (chatId === undefined) return;
+    if (!isAllowed(cfg, chatId)) {
+      await ctx.answer(cq.id, 'Chat chưa được cấp quyền.');
+
+      return;
+    }
+    await handleCallback(ctx, chatId, cq.id, cq.data || '');
+
+    return;
+  }
+
+  // Message text
+  const { message } = update;
   const text = message?.text || '';
-
   if (!message || !text) return;
-  if (allowedChatIds.length && !allowedChatIds.includes(String(message.chat.id))) return;
 
-  const url = extractUrl(text);
+  const chatId = message.chat.id;
+  if (!isAllowed(cfg, chatId)) {
+    // Cho phép xem chatId để admin thêm vào allowlist.
+    await ctx
+      .send(chatId, `Chat chưa được cấp quyền. Chat ID của bạn: ${chatId}\nThêm vào Allowed chat IDs trong Settings.`)
+      .catch(() => undefined);
 
-  if (!url) {
-    await sendMessage(message.chat.id, 'Gửi link XSH hoặc Douyin để tạo bài nháp.');
     return;
   }
 
-  const accountMatch = text.match(/account[:=]\s*([a-zA-Z0-9_-]+)/i);
-  const accountId = accountMatch?.[1] || defaultAccountId;
-
-  if (!accountId) {
-    await sendMessage(message.chat.id, 'Chưa cấu hình TELEGRAM_DEFAULT_SOCIAL_ACCOUNT_ID hoặc account:<id>.');
-    return;
-  }
-
-  await sendMessage(message.chat.id, 'Đang tải nguồn và tạo bài nháp...');
-
-  try {
-    const result = await createSourceImport(accountId, url);
-    const status = result.data?.status || 'UNKNOWN';
-    const postId = result.postId || result.data?.postId || '';
-
-    await sendMessage(message.chat.id, postId ? `Đã tạo nháp: ${postId}` : `Import kết thúc với trạng thái: ${status}`);
-  } catch (error) {
-    await sendMessage(message.chat.id, error instanceof Error ? error.message : 'Import thất bại');
-  }
+  await handleMessage(ctx, chatId, text);
 }
 
-async function poll() {
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Một vòng poll độc lập cho 1 bot (token + offset riêng). Đọc config động mỗi vòng.
+// keepRunning() = false -> thoát sau vòng poll hiện tại (dùng để dừng bot bị tắt/xoá).
+async function runBotLoop(
+  name: string,
+  getCfg: () => Promise<TelegramConfig | null>,
+  keepRunning: () => boolean
+) {
+  console.log(`[telegram] loop start: ${name}`);
   let offset = 0;
 
-  console.log('Gami Telegram bot started');
-
-  while (true) {
+  while (keepRunning()) {
+    let cfg: TelegramConfig | null = null;
     try {
-      const response = await telegram('getUpdates', { offset, timeout: 30 });
+      cfg = await getCfg();
+    } catch {
+      cfg = null;
+    }
+
+    if (!cfg || !cfg.enabled || !cfg.botToken) {
+      await sleep(10_000);
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    try {
+      const response = await telegram(cfg, 'getUpdates', { offset, timeout: 30 });
       const updates = (response.result || []) as TelegramUpdate[];
 
+      // eslint-disable-next-line no-restricted-syntax
       for (const update of updates) {
         offset = Math.max(offset, update.update_id + 1);
-        await handleUpdate(update);
+        // eslint-disable-next-line no-await-in-loop
+        await handleUpdate(cfg, update).catch((error) => console.error(`handleUpdate ${name}`, error));
       }
     } catch (error) {
-      console.error(error);
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      console.error(`[telegram] ${name}`, error);
+      await sleep(5000);
     }
   }
+
+  console.log(`[telegram] loop stop: ${name}`);
 }
 
-if (!token) {
-  console.log('TELEGRAM_BOT_TOKEN is empty, telegram bot is disabled');
-} else {
-  poll().catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+async function main() {
+  // Watcher chung: fallback notify qua bot chung (item.notify của từng bot sẽ ưu tiên).
+  if (!watcherStarted) {
+    initWatcher(async (chatId, text, replyMarkup) => {
+      const current = await getTelegramConfig();
+      if (!current.botToken) return;
+      await telegram(current, 'sendMessage', {
+        chat_id: chatId,
+        text,
+        parse_mode: 'Markdown',
+        reply_markup: replyMarkup,
+        disable_web_page_preview: true,
+      }).catch(() => undefined);
+    });
+    watcherStarted = true;
+  }
+
+  // Bot chung cũ: luôn có loop (tự idle khi tắt trong Settings).
+  runBotLoop('legacy', getTelegramConfig, () => true).catch((e) => console.error('[telegram] legacy', e));
+
+  // Supervisor cho các bot gán riêng: định kỳ nạp danh sách, start loop mới, dừng loop đã tắt/xoá.
+  const activeBotIds = new Set<string>();
+
+  const reconcile = async () => {
+    let ids: string[] = [];
+    try {
+      ids = await listEnabledBotIds();
+    } catch {
+      ids = [];
+    }
+    const idSet = new Set(ids);
+
+    for (const id of ids) {
+      if (!activeBotIds.has(id)) {
+        activeBotIds.add(id);
+        runBotLoop(`bot:${id}`, () => resolveBotConfig(id), () => activeBotIds.has(id)).catch((e) =>
+          console.error(`[telegram] bot:${id}`, e)
+        );
+      }
+    }
+    // Bot không còn bật -> bỏ khỏi set để loop tự thoát vòng kế.
+    for (const id of Array.from(activeBotIds)) {
+      if (!idSet.has(id)) activeBotIds.delete(id);
+    }
+  };
+
+  await reconcile();
+  setInterval(() => reconcile().catch((e) => console.error('[telegram] reconcile', e)), 30_000);
+
+  console.log('Gami Telegram multi-bot started');
 }
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

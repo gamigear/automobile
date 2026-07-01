@@ -36,6 +36,7 @@ import { paths } from 'src/routes/paths';
 import { useAuthContext } from 'src/auth/hooks';
 // components
 import Iconify from 'src/components/iconify';
+import TelegramBotsManager from './telegram-bots-manager';
 import { useSnackbar } from 'src/components/snackbar';
 import { useSettingsContext } from 'src/components/settings';
 import CustomBreadcrumbs from 'src/components/custom-breadcrumbs';
@@ -7243,6 +7244,9 @@ function SettingsModule({ canAdmin }: { canAdmin: boolean }) {
             </Grid>
           </CardContent>
         </Card>
+      </Grid>
+      <Grid item xs={12}>
+        <TelegramBotsManager canAdmin={canAdmin} />
       </Grid>
       <Grid item xs={12}>
         <Card>
