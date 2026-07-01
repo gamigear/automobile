@@ -46,7 +46,7 @@ type Bot = {
 const EMPTY_FORM = {
   label: '',
   botToken: '',
-  binding: 'ACCOUNT' as 'ACCOUNT' | 'DEVICE',
+  binding: 'DEVICE' as 'ACCOUNT' | 'DEVICE',
   socialAccountId: '',
   deviceId: '',
   allowedChatIds: '',
@@ -56,7 +56,6 @@ const EMPTY_FORM = {
 export default function TelegramBotsManager({ canAdmin }: { canAdmin: boolean }) {
   const { enqueueSnackbar } = useSnackbar();
   const [bots, setBots] = useState<Bot[]>([]);
-  const [accounts, setAccounts] = useState<any[]>([]);
   const [devices, setDevices] = useState<any[]>([]);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
@@ -65,7 +64,8 @@ export default function TelegramBotsManager({ canAdmin }: { canAdmin: boolean })
     try {
       const res = await fetch('/api/settings/telegram/bots/', { headers: headers() });
       const body = await res.json();
-      if (Array.isArray(body?.data)) setBots(body.data);
+      // Bot theo account quản lý inline trong workspace tài khoản -> ở đây chỉ liệt kê bot device.
+      if (Array.isArray(body?.data)) setBots(body.data.filter((b: Bot) => b.binding === 'DEVICE'));
     } catch {
       /* ignore */
     }
@@ -73,11 +73,7 @@ export default function TelegramBotsManager({ canAdmin }: { canAdmin: boolean })
 
   useEffect(() => {
     loadBots();
-    fetch('/api/accounts/', { headers: headers() })
-      .then((r) => r.json())
-      .then((b) => Array.isArray(b?.data) && setAccounts(b.data))
-      .catch(() => undefined);
-    fetch('/api/devices/', { headers: headers() })
+    fetch('/api/devices/?type=ANDROID_DEVICE', { headers: headers() })
       .then((r) => r.json())
       .then((b) => Array.isArray(b?.data) && setDevices(b.data))
       .catch(() => undefined);
@@ -86,8 +82,8 @@ export default function TelegramBotsManager({ canAdmin }: { canAdmin: boolean })
   const set = (key: keyof typeof form) => (e: any) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
   const createBot = useCallback(async () => {
-    if (!form.label.trim() || !form.botToken.trim()) {
-      enqueueSnackbar('Nhập tên và token bot', { variant: 'warning' });
+    if (!form.label.trim() || !form.botToken.trim() || !form.deviceId) {
+      enqueueSnackbar('Nhập tên, token và chọn thiết bị', { variant: 'warning' });
       return;
     }
     setSaving(true);
@@ -95,7 +91,7 @@ export default function TelegramBotsManager({ canAdmin }: { canAdmin: boolean })
       const res = await fetch('/api/settings/telegram/bots/', {
         method: 'POST',
         headers: headers(),
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, binding: 'DEVICE', socialAccountId: undefined }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || 'Không tạo được bot');
@@ -159,8 +155,8 @@ export default function TelegramBotsManager({ canAdmin }: { canAdmin: boolean })
   return (
     <Card>
       <CardHeader
-        title="Bot Telegram theo account / thiết bị"
-        subheader="Mỗi bot gán riêng 1 tài khoản hoặc 1 thiết bị. Chạy chung với worker: npm run telegram:bot"
+        title="Bot Telegram theo thiết bị"
+        subheader="Gán bot cho 1 thiết bị (đăng vào các tài khoản của thiết bị đó). Bot theo tài khoản: nhập token ngay trong workspace tài khoản. Worker: npm run telegram:bot"
       />
       <CardContent>
         <Stack spacing={2}>
@@ -209,32 +205,27 @@ export default function TelegramBotsManager({ canAdmin }: { canAdmin: boolean })
 
           <Divider />
 
-          {/* Form thêm bot */}
-          <Typography variant="subtitle2">Thêm bot mới</Typography>
+          {/* Form thêm bot cho thiết bị */}
+          <Typography variant="subtitle2">Thêm bot cho thiết bị</Typography>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} flexWrap="wrap" useFlexGap>
             <TextField size="small" label="Tên bot" value={form.label} onChange={set('label')} sx={{ minWidth: 180 }} disabled={!canAdmin} />
             <TextField size="small" label="Bot token" value={form.botToken} onChange={set('botToken')} sx={{ minWidth: 240 }} disabled={!canAdmin} />
-            <TextField select size="small" label="Gán theo" value={form.binding} onChange={set('binding')} sx={{ minWidth: 130 }} disabled={!canAdmin}>
-              <MenuItem value="ACCOUNT">Tài khoản</MenuItem>
-              <MenuItem value="DEVICE">Thiết bị</MenuItem>
+            <TextField
+              select
+              size="small"
+              label="Thiết bị"
+              value={form.deviceId}
+              onChange={set('deviceId')}
+              sx={{ minWidth: 200 }}
+              disabled={!canAdmin}
+              helperText={devices.length === 0 ? 'Chưa có thiết bị Android' : undefined}
+            >
+              {devices.map((d) => (
+                <MenuItem key={d.id} value={d.id}>
+                  {d.name}
+                </MenuItem>
+              ))}
             </TextField>
-            {form.binding === 'ACCOUNT' ? (
-              <TextField select size="small" label="Tài khoản" value={form.socialAccountId} onChange={set('socialAccountId')} sx={{ minWidth: 200 }} disabled={!canAdmin}>
-                {accounts.map((a) => (
-                  <MenuItem key={a.id} value={a.id}>
-                    {a.name} · {a.platform || ''}
-                  </MenuItem>
-                ))}
-              </TextField>
-            ) : (
-              <TextField select size="small" label="Thiết bị" value={form.deviceId} onChange={set('deviceId')} sx={{ minWidth: 200 }} disabled={!canAdmin}>
-                {devices.map((d) => (
-                  <MenuItem key={d.id} value={d.id}>
-                    {d.name}
-                  </MenuItem>
-                ))}
-              </TextField>
-            )}
             <TextField size="small" label="Allowed chat IDs (csv)" value={form.allowedChatIds} onChange={set('allowedChatIds')} sx={{ minWidth: 200 }} disabled={!canAdmin} />
             <TextField size="small" label="TZ offset" value={form.tzOffset} onChange={set('tzOffset')} sx={{ width: 110 }} disabled={!canAdmin} />
             <Box>

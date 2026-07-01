@@ -37,6 +37,7 @@ import { useAuthContext } from 'src/auth/hooks';
 // components
 import Iconify from 'src/components/iconify';
 import TelegramBotsManager from './telegram-bots-manager';
+import AccountTelegramBot from './account-telegram-bot';
 import { useSnackbar } from 'src/components/snackbar';
 import { useSettingsContext } from 'src/components/settings';
 import CustomBreadcrumbs from 'src/components/custom-breadcrumbs';
@@ -3103,7 +3104,10 @@ function AccountWorkspaceModule({ canAdmin, canCreate }: { canAdmin: boolean; ca
           </Stack>
         </Grid>
         <Grid item xs={12} lg={4}>
-          <DataCard title="Jobs theo tài khoản" rows={jobRows} columns={jobColumns.slice(0, 4)} />
+          <Stack spacing={2}>
+            <DataCard title="Jobs theo tài khoản" rows={jobRows} columns={jobColumns.slice(0, 4)} />
+            {accountId && <AccountTelegramBot accountId={accountId} canAdmin={canAdmin} />}
+          </Stack>
         </Grid>
       </Grid>
 
