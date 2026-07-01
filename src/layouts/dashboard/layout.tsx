@@ -5,6 +5,7 @@ import { useBoolean } from 'src/hooks/use-boolean';
 import { useResponsive } from 'src/hooks/use-responsive';
 // components
 import { useSettingsContext } from 'src/components/settings';
+import ActivityBar from 'src/components/activity-bar';
 //
 import Main from './main';
 import Header from './header';
@@ -43,6 +44,8 @@ export default function DashboardLayout({ children }: Props) {
         {lgUp ? renderHorizontal : renderNavVertical}
 
         <Main>{children}</Main>
+
+        <ActivityBar />
       </>
     );
   }
@@ -62,6 +65,8 @@ export default function DashboardLayout({ children }: Props) {
 
           <Main>{children}</Main>
         </Box>
+
+        <ActivityBar />
       </>
     );
   }
@@ -80,6 +85,8 @@ export default function DashboardLayout({ children }: Props) {
 
         <Main>{children}</Main>
       </Box>
+
+      <ActivityBar />
     </>
   );
 }

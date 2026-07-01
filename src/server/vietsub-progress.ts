@@ -97,3 +97,10 @@ export function finishVietsubProgress(postId: string, error?: string): void {
 export function getVietsubProgress(postId: string): VietsubProgress | null {
   return store.get(postId) ?? null;
 }
+
+// Danh sách tiến trình media đang chạy (chưa done/error) — cho thanh công việc toàn cục.
+export function listActiveVietsubProgress(): VietsubProgress[] {
+  cleanup();
+
+  return Array.from(store.values()).filter((p) => p.phase !== 'done' && p.phase !== 'error');
+}
