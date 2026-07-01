@@ -15,13 +15,17 @@ import { initWatcher } from './telegram/watch';
 
 type TelegramUpdate = {
   update_id: number;
-  message?: { chat: { id: number }; text?: string };
+  message?: { chat: { id: number }; text?: string; from?: { username?: string } };
   callback_query?: {
     id: string;
     data?: string;
+    from?: { username?: string };
     message?: { chat: { id: number } };
   };
 };
+
+// Tài khoản cha (owner): luôn được phép trên MỌI bot, bất kể allowedChatIds.
+const OWNER_USERNAME = (process.env.TELEGRAM_OWNER_USERNAME || 'wtfkute').replace(/^@/, '').toLowerCase();
 
 async function telegram(cfg: TelegramConfig, method: string, body: Record<string, unknown>) {
   const response = await fetch(`${cfg.apiBaseUrl}/bot${cfg.botToken}/${method}`, {
@@ -55,7 +59,10 @@ function makeCtx(cfg: TelegramConfig): BotCtx & { answer: (id: string, text?: st
   };
 }
 
-function isAllowed(cfg: TelegramConfig, chatId: number): boolean {
+function isAllowed(cfg: TelegramConfig, chatId: number, username?: string): boolean {
+  // Tài khoản cha luôn được phép (mọi bot).
+  if (username && username.toLowerCase() === OWNER_USERNAME) return true;
+
   // Rỗng = chưa cấu hình -> chặn (an toàn). Buộc admin set allowed chat ids.
   if (!cfg.allowedChatIds.length) return false;
 
@@ -72,7 +79,7 @@ async function handleUpdate(cfg: TelegramConfig, update: TelegramUpdate) {
     const cq = update.callback_query;
     const chatId = cq.message?.chat.id;
     if (chatId === undefined) return;
-    if (!isAllowed(cfg, chatId)) {
+    if (!isAllowed(cfg, chatId, cq.from?.username)) {
       await ctx.answer(cq.id, 'Chat chưa được cấp quyền.');
 
       return;
@@ -88,7 +95,7 @@ async function handleUpdate(cfg: TelegramConfig, update: TelegramUpdate) {
   if (!message || !text) return;
 
   const chatId = message.chat.id;
-  if (!isAllowed(cfg, chatId)) {
+  if (!isAllowed(cfg, chatId, message.from?.username)) {
     // Cho phép xem chatId để admin thêm vào allowlist.
     await ctx
       .send(chatId, `Chat chưa được cấp quyền. Chat ID của bạn: ${chatId}\nThêm vào Allowed chat IDs trong Settings.`)
